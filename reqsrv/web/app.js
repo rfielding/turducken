@@ -29,6 +29,18 @@ async function refreshDocs() {
   await loadSelectedDoc();
 }
 
+function selectDocIfExists(id) {
+  const sel = document.getElementById("docSelect");
+  for (const opt of sel.options) {
+    if (opt.value === id) { sel.value = id; return true; }
+  }
+  return false;
+}
+
+// after repopulating options:
+selectDocIfExists("artifacts.md");
+await loadSelectedDoc();
+
 async function loadSelectedDoc() {
   const sel = document.getElementById("docSelect");
   const id = sel.value;

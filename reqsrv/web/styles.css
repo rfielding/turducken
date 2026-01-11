@@ -114,3 +114,13 @@ select {
   line-height: 1.4;
 }
 
+.msg.assistant {
+  color: #4ade80; /* readable green on dark bg */
+  font-weight: 500;
+}
+
+.msg.user {
+  color: #e6edf3;
+  font-weight: 700;
+}
+
