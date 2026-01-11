@@ -1,0 +1,16 @@
+html, body { height: 100%; margin: 0; font-family: sans-serif; }
+#app { height: 100%; display: flex; }
+.pane { height: 100%; overflow: hidden; }
+.left { width: 45%; border-right: 1px solid #ddd; display: flex; flex-direction: column; }
+.right { width: 55%; display: flex; flex-direction: column; }
+
+.chatlog { flex: 1; overflow: auto; padding: 12px; }
+.msg { margin: 8px 0; white-space: pre-wrap; }
+.msg.user { font-weight: 600; }
+.msg.assistant { }
+
+.composer { border-top: 1px solid #ddd; padding: 8px; display: flex; gap: 8px; }
+textarea { flex: 1; height: 90px; }
+
+.docbar { border-bottom: 1px solid #ddd; padding: 8px; display: flex; gap: 8px; }
+.docview { flex: 1; overflow: auto; padding: 12px; }
