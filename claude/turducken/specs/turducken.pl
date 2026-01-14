@@ -33,29 +33,32 @@ doc(usage, "To use turducken:
 % === NAMED PROPERTIES (for Check tab) ===
 % property(Name, Description, Formula) - named CTL properties
 
+% filepath: /home/rfielding/code/turducken/claude/turducken/specs/turducken.pl
+% Change the property definitions to use string formulas:
+
 property(safety_preserve_spec, 
-    "If spec is loaded and query runs, spec remains loaded",
-    ag(or(not(and(atom(has_spec), ex(atom(running_query)))), ax(atom(has_spec))))).
+    'If spec is loaded and query runs, spec remains loaded',
+    'ag(or(not(and(atom(has_spec), ex(atom(running_query)))), ax(atom(has_spec))))').
 
 property(liveness_chat_response,
-    "Chat responses are always eventually received", 
-    ag(or(not(atom(waiting_response)), af(atom(accepting_input))))).
+    'Chat responses are always eventually received', 
+    'ag(or(not(atom(waiting_response)), af(atom(accepting_input))))').
 
 property(no_deadlock,
-    "System can always eventually accept input",
-    ag(ef(atom(accepting_input)))).
+    'System can always eventually accept input',
+    'ag(ef(atom(accepting_input)))').
 
 property(can_always_reset,
-    "System can always eventually be reset",
-    ag(ef(atom(no_spec)))).
+    'System can always eventually be reset',
+    'ag(ef(atom(no_spec)))').
 
 property(llm_error_recovery,
-    "LLM errors can always be recovered from",
-    ag(or(not(atom(failed)), ef(atom(ready))))).
+    'LLM errors can always be recovered from',
+    'ag(or(not(atom(failed)), ef(atom(ready))))').
 
 property(server_invariant,
-    "Server is always listening or processing",
-    ag(or(atom(listening), atom(processing)))).
+    'Server is always listening or processing',
+    'ag(or(atom(listening), atom(processing)))').
 
 % === ACTORS ===
 actor(user, ui_idle).

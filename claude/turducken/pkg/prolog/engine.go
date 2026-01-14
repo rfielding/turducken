@@ -230,7 +230,11 @@ append([H|T], L, [H|R]) :- append(T, L, R).
 
 length([], 0).
 length([_|T], N) :- length(T, N1), N is N1 + 1.
+
+% forall(Cond, Action) - for all solutions of Cond, Action must succeed
+forall(Cond, Action) :- \+ (Cond, \+ Action).
 `
+
 	return e.interpreter.Exec(core)
 }
 
@@ -293,14 +297,67 @@ func (e *Engine) QueryOne(ctx context.Context, query string) (bool, error) {
 
 // Helper function to convert prolog term to string
 func termToString(v interface{}) string {
-	switch t := v.(type) {
-	case string:
-		return t
-	case fmt.Stringer:
-		return t.String()
-	default:
-		return fmt.Sprintf("%v", v)
+	if v == nil {
+		return ""
 	}
+
+	// Handle native string
+	if s, ok := v.(string); ok {
+		return s
+	}
+
+	// Handle Stringer interface (covers engine.Atom, etc.)
+	if s, ok := v.(fmt.Stringer); ok {
+		str := s.String()
+
+		// Check if it's a character list representation like "[a g ( o r ...]"
+		// ichiban/prolog outputs strings with spaces between each character
+		if strings.HasPrefix(str, "[") && strings.HasSuffix(str, "]") {
+			inner := str[1 : len(str)-1]
+			if inner == "" {
+				return ""
+			}
+
+			// First try: parse as comma-separated integers (char codes)
+			parts := strings.Split(inner, ",")
+			if len(parts) > 1 {
+				var chars []byte
+				allInts := true
+				for _, p := range parts {
+					p = strings.TrimSpace(p)
+					var code int
+					if _, err := fmt.Sscanf(p, "%d", &code); err == nil && code >= 0 && code < 256 {
+						chars = append(chars, byte(code))
+					} else {
+						allInts = false
+						break
+					}
+				}
+				if allInts && len(chars) > 0 {
+					return string(chars)
+				}
+			}
+
+			// Second try: space-separated characters
+			// Pattern: each char is followed by space, real spaces become double-space
+			// "hello world" -> "h e l l o   w o r l d"
+			//                          ^^ double space = real space
+
+			// Check if it looks like spaced chars by ratio
+			noSpaces := strings.ReplaceAll(inner, " ", "")
+			if len(noSpaces) > 0 && float64(len(noSpaces))/float64(len(inner)) < 0.6 {
+				// Replace double-space with placeholder, remove single spaces, restore spaces
+				placeholder := "\x00"
+				result := strings.ReplaceAll(inner, "  ", placeholder)
+				result = strings.ReplaceAll(result, " ", "")
+				result = strings.ReplaceAll(result, placeholder, " ")
+				return result
+			}
+		}
+		return str
+	}
+
+	return fmt.Sprintf("%v", v)
 }
 
 // Helper function to convert prolog term to int
