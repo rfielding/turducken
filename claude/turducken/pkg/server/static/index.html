@@ -540,6 +540,9 @@ transition(busy, done, idle).
             const source = document.getElementById('specEditor').value;
             setStatus('loading', 'Applying...');
             
+            // Clear visualizations before applying
+            document.getElementById('vizOutput').innerHTML = '<div class="loading"></div>';
+            
             try {
                 const resp = await fetch('/api/spec', {
                     method: 'POST',
@@ -552,11 +555,16 @@ transition(busy, done, idle).
                     setStatus('success', 'Spec loaded');
                     // Auto-switch to viz tab after applying
                     switchTab('viz');
+                    // Trigger visualization refresh
+                    visualize('statemachine');
                 } else {
                     setStatus('error', 'Error: ' + data.error);
+                    // Show error in viz output too
+                    document.getElementById('vizOutput').innerHTML = `<div style="color: var(--accent-red);">Spec Error: ${data.error}</div>`;
                 }
             } catch (err) {
                 setStatus('error', 'Failed: ' + err.message);
+                document.getElementById('vizOutput').innerHTML = `<div style="color: var(--accent-red);">Failed: ${err.message}</div>`;
             }
         }
         
@@ -752,11 +760,8 @@ transition(busy, done, idle).
         }
         
         function generateStateMachineMermaid(data) {
-            if (!data || !data.states || data.states.length === 0) {
-                return `stateDiagram-v2
-    [*] --> idle
-    idle --> busy: start
-    busy --> idle: done`;
+            if (!data || !data.transitions || data.transitions.length === 0) {
+                return null;  // Return null instead of hardcoded diagram
             }
             
             let code = 'stateDiagram-v2\n';
@@ -784,11 +789,7 @@ transition(busy, done, idle).
         
         function generateSequenceMermaid(data) {
             if (!data || !data.messages || data.messages.length === 0) {
-                return `sequenceDiagram
-    participant Client
-    participant Server
-    Client->>Server: request
-    Server-->>Client: response`;
+                return null;  // Return null instead of hardcoded diagram
             }
             
             let code = 'sequenceDiagram\n';
@@ -915,7 +916,8 @@ transition(responding, response, idle).`
             if (type === 'error') indicator.classList.add('error');
             statusText.textContent = text;
             
-            if (type !== 'loading') {
+            // Only auto-clear success messages, not errors
+            if (type === 'success') {
                 setTimeout(() => {
                     indicator.className = 'status-indicator';
                     statusText.textContent = 'Ready';
@@ -977,6 +979,11 @@ transition(responding, response, idle).`
         
         // Initialize on page load
         loadProvider();
+        
+        // On page load, clear any stale visualization state
+        window.addEventListener('load', () => {
+            document.getElementById('vizOutput').innerHTML = '<div style="color: var(--text-secondary);">No spec loaded. Apply a specification to see visualizations.</div>';
+        });
         
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {

@@ -3,6 +3,7 @@ package prolog
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 
@@ -35,7 +36,6 @@ func (e *Engine) loadCore() error {
 	core := `
 % ============================================================================
 % TURDUCKEN CORE PREDICATES
-% CTL Model Checking + CSP Message Passing + Visualization Extraction
 % ============================================================================
 
 % --- State Machine Representation ---
@@ -291,6 +291,32 @@ func (e *Engine) QueryOne(ctx context.Context, query string) (bool, error) {
 	return sols.Next(), sols.Err()
 }
 
+// Helper function to convert prolog term to string
+func termToString(v interface{}) string {
+	switch t := v.(type) {
+	case string:
+		return t
+	case fmt.Stringer:
+		return t.String()
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
+
+// Helper function to convert prolog term to int
+func termToInt(v interface{}) int {
+	switch t := v.(type) {
+	case int:
+		return t
+	case int64:
+		return int(t)
+	case float64:
+		return int(t)
+	default:
+		return 0
+	}
+}
+
 // GetStateMachine extracts state machine data from the loaded spec
 func (e *Engine) GetStateMachine(ctx context.Context) (*StateMachine, error) {
 	e.mu.RLock()
@@ -306,47 +332,73 @@ func (e *Engine) GetStateMachine(ctx context.Context) (*StateMachine, error) {
 	// Get transitions and collect states from them
 	stateSet := make(map[string]bool)
 	sols, err := e.interpreter.QueryContext(ctx, "transition(From, Label, To).")
-	if err == nil {
-		for sols.Next() {
-			var result map[string]interface{}
-			if err := sols.Scan(&result); err == nil {
-				from := result["From"].(string)
-				label := result["Label"].(string)
-				to := result["To"].(string)
-				sm.Transitions = append(sm.Transitions, Transition{
-					From:  from,
-					Label: label,
-					To:    to,
-				})
-				stateSet[from] = true
-				stateSet[to] = true
-			}
-		}
-		sols.Close()
+	if err != nil {
+		log.Printf("Error querying transitions: %v", err)
+		return sm, nil
 	}
+
+	for sols.Next() {
+		var result struct {
+			From  interface{}
+			Label interface{}
+			To    interface{}
+		}
+		if err := sols.Scan(&result); err != nil {
+			log.Printf("Error scanning transition: %v", err)
+			continue
+		}
+		fromStr := termToString(result.From)
+		labelStr := termToString(result.Label)
+		toStr := termToString(result.To)
+		log.Printf("Found transition: %s --%s--> %s", fromStr, labelStr, toStr)
+		sm.Transitions = append(sm.Transitions, Transition{
+			From:  fromStr,
+			Label: labelStr,
+			To:    toStr,
+		})
+		stateSet[fromStr] = true
+		stateSet[toStr] = true
+	}
+	sols.Close()
 
 	// Get initial states
 	sols, err = e.interpreter.QueryContext(ctx, "initial(S).")
-	if err == nil {
+	if err != nil {
+		log.Printf("Error querying initial: %v", err)
+	} else {
 		for sols.Next() {
-			var s string
-			if err := sols.Scan(&s); err == nil {
-				sm.Initial = append(sm.Initial, s)
-				stateSet[s] = true
+			var result struct {
+				S interface{}
 			}
+			if err := sols.Scan(&result); err != nil {
+				log.Printf("Error scanning initial: %v", err)
+				continue
+			}
+			sStr := termToString(result.S)
+			log.Printf("Found initial state: %s", sStr)
+			sm.Initial = append(sm.Initial, sStr)
+			stateSet[sStr] = true
 		}
 		sols.Close()
 	}
 
 	// Get accepting states
 	sols, err = e.interpreter.QueryContext(ctx, "accepting(S).")
-	if err == nil {
+	if err != nil {
+		log.Printf("Error querying accepting: %v", err)
+	} else {
 		for sols.Next() {
-			var s string
-			if err := sols.Scan(&s); err == nil {
-				sm.Accepting = append(sm.Accepting, s)
-				stateSet[s] = true
+			var result struct {
+				S interface{}
 			}
+			if err := sols.Scan(&result); err != nil {
+				log.Printf("Error scanning accepting: %v", err)
+				continue
+			}
+			sStr := termToString(result.S)
+			log.Printf("Found accepting state: %s", sStr)
+			sm.Accepting = append(sm.Accepting, sStr)
+			stateSet[sStr] = true
 		}
 		sols.Close()
 	}
@@ -356,6 +408,7 @@ func (e *Engine) GetStateMachine(ctx context.Context) (*StateMachine, error) {
 		sm.States = append(sm.States, s)
 	}
 
+	log.Printf("GetStateMachine returning %d states, %d transitions", len(sm.States), len(sm.Transitions))
 	return sm, nil
 }
 
@@ -387,9 +440,11 @@ func (e *Engine) GetSequenceDiagram(ctx context.Context) (*SequenceDiagram, erro
 	sols, err := e.interpreter.QueryContext(ctx, "lifeline(L).")
 	if err == nil {
 		for sols.Next() {
-			var l string
-			if err := sols.Scan(&l); err == nil {
-				seq.Lifelines = append(seq.Lifelines, l)
+			var result struct {
+				L interface{}
+			}
+			if err := sols.Scan(&result); err == nil {
+				seq.Lifelines = append(seq.Lifelines, termToString(result.L))
 			}
 		}
 		sols.Close()
@@ -399,17 +454,18 @@ func (e *Engine) GetSequenceDiagram(ctx context.Context) (*SequenceDiagram, erro
 	sols, err = e.interpreter.QueryContext(ctx, "message(Seq, From, To, Label).")
 	if err == nil {
 		for sols.Next() {
-			var result map[string]interface{}
+			var result struct {
+				Seq   interface{}
+				From  interface{}
+				To    interface{}
+				Label interface{}
+			}
 			if err := sols.Scan(&result); err == nil {
-				seqNum := int(result["Seq"].(float64)) // Convert from float64 if necessary
-				from := result["From"].(string)
-				to := result["To"].(string)
-				label := result["Label"].(string)
 				seq.Messages = append(seq.Messages, SequenceMessage{
-					Seq:   seqNum,
-					From:  from,
-					To:    to,
-					Label: label,
+					Seq:   termToInt(result.Seq),
+					From:  termToString(result.From),
+					To:    termToString(result.To),
+					Label: termToString(result.Label),
 				})
 			}
 		}
@@ -435,11 +491,15 @@ func (e *Engine) GetPieChart(ctx context.Context) ([]PieSlice, error) {
 	sols, err := e.interpreter.QueryContext(ctx, "pie_slice(Label, Value).")
 	if err == nil {
 		for sols.Next() {
-			var result map[string]interface{}
+			var result struct {
+				Label interface{}
+				Value interface{}
+			}
 			if err := sols.Scan(&result); err == nil {
-				label := result["Label"].(string)
-				value := result["Value"].(float64)
-				slices = append(slices, PieSlice{Label: label, Value: value})
+				slices = append(slices, PieSlice{
+					Label: termToString(result.Label),
+					Value: float64(termToInt(result.Value)),
+				})
 			}
 		}
 		sols.Close()
@@ -465,12 +525,17 @@ func (e *Engine) GetLineChart(ctx context.Context) ([]LinePoint, error) {
 	sols, err := e.interpreter.QueryContext(ctx, "line_point(Series, X, Y).")
 	if err == nil {
 		for sols.Next() {
-			var result map[string]interface{}
+			var result struct {
+				Series interface{}
+				X      interface{}
+				Y      interface{}
+			}
 			if err := sols.Scan(&result); err == nil {
-				series := result["Series"].(string)
-				x := result["X"].(float64)
-				y := result["Y"].(float64)
-				points = append(points, LinePoint{Series: series, X: x, Y: y})
+				points = append(points, LinePoint{
+					Series: termToString(result.Series),
+					X:      float64(termToInt(result.X)),
+					Y:      float64(termToInt(result.Y)),
+				})
 			}
 		}
 		sols.Close()
