@@ -34,7 +34,7 @@
         }
         
         .container {
-            max-width: 1400px;
+            max-width: 1600px;
             margin: 0 auto;
             padding: 20px;
         }
@@ -80,11 +80,13 @@
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 20px;
+            height: calc(100vh - 120px);
         }
         
         @media (max-width: 1000px) {
             .main-grid {
                 grid-template-columns: 1fr;
+                height: auto;
             }
         }
         
@@ -93,6 +95,8 @@
             border: 1px solid var(--border-color);
             border-radius: 8px;
             overflow: hidden;
+            display: flex;
+            flex-direction: column;
         }
         
         .panel-header {
@@ -102,6 +106,7 @@
             padding: 12px 16px;
             background: var(--bg-tertiary);
             border-bottom: 1px solid var(--border-color);
+            flex-shrink: 0;
         }
         
         .panel-title {
@@ -111,6 +116,10 @@
         
         .panel-body {
             padding: 16px;
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
         }
         
         .tabs {
@@ -119,6 +128,7 @@
             padding: 8px 16px;
             background: var(--bg-tertiary);
             border-bottom: 1px solid var(--border-color);
+            flex-shrink: 0;
         }
         
         .tab {
@@ -160,7 +170,9 @@
         }
         
         .editor {
-            min-height: 400px;
+            flex: 1;
+            min-height: 200px;
+            resize: none;
         }
         
         .btn {
@@ -192,15 +204,6 @@
             background: var(--border-color);
         }
         
-        .btn-danger {
-            background: var(--accent-red);
-            color: white;
-        }
-        
-        .btn-danger:hover {
-            background: #d73a3a;
-        }
-        
         .btn-success {
             background: var(--accent-green);
             color: white;
@@ -210,6 +213,7 @@
             display: flex;
             gap: 8px;
             margin-top: 12px;
+            flex-shrink: 0;
         }
         
         .output {
@@ -219,8 +223,8 @@
             padding: 12px;
             font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
             font-size: 0.85rem;
-            min-height: 150px;
-            max-height: 400px;
+            min-height: 100px;
+            max-height: 200px;
             overflow-y: auto;
             white-space: pre-wrap;
         }
@@ -234,10 +238,17 @@
             color: var(--accent-red);
         }
         
+        .chat-container {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+        
         .chat-messages {
-            max-height: 300px;
+            flex: 1;
             overflow-y: auto;
             margin-bottom: 12px;
+            padding-right: 8px;
         }
         
         .message {
@@ -263,20 +274,24 @@
             margin-bottom: 4px;
         }
         
-        .viz-container {
+        .chat-input-area {
+            flex-shrink: 0;
+        }
+        
+        .chat-input-area textarea {
+            min-height: 80px;
+        }
+        
+        .mermaid-output {
             background: var(--bg-primary);
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
             padding: 20px;
-            min-height: 300px;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            overflow-x: auto;
+            flex: 1;
             display: flex;
             align-items: center;
             justify-content: center;
-        }
-        
-        .viz-container svg {
-            max-width: 100%;
-            max-height: 400px;
         }
         
         .property-check {
@@ -308,23 +323,12 @@
         
         .tab-content {
             display: none;
+            flex: 1;
+            flex-direction: column;
         }
         
         .tab-content.active {
-            display: block;
-        }
-        
-        .mermaid-output {
-            background: var(--bg-primary);
-            padding: 20px;
-            border-radius: 6px;
-            border: 1px solid var(--border-color);
-            overflow-x: auto;
-        }
-        
-        /* Mermaid dark theme overrides */
-        .mermaid {
-            background: transparent;
+            display: flex;
         }
         
         pre code {
@@ -357,6 +361,7 @@
         
         .examples {
             margin-top: 12px;
+            flex-shrink: 0;
         }
         
         .example-btn {
@@ -364,6 +369,14 @@
             padding: 4px 8px;
             margin-right: 4px;
             margin-bottom: 4px;
+        }
+        
+        .viz-buttons {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+            flex-shrink: 0;
         }
     </style>
 </head>
@@ -382,17 +395,36 @@
         </header>
         
         <div class="main-grid">
-            <!-- Left Panel: Specification Editor -->
+            <!-- Left Panel: Spec & Visualization -->
             <div class="panel">
-                <div class="panel-header">
-                    <span class="panel-title">📝 Prolog Specification</span>
-                    <div class="btn-group" style="margin: 0;">
-                        <button class="btn btn-primary" onclick="applySpec()">Apply</button>
-                        <button class="btn btn-secondary" onclick="resetEngine()">Reset</button>
+                <div class="tabs">
+                    <button class="tab active" onclick="switchTab('viz')">📊 Visualize</button>
+                    <button class="tab" onclick="switchTab('spec')">📝 Prolog</button>
+                    <button class="tab" onclick="switchTab('query')">🔍 Query</button>
+                    <button class="tab" onclick="switchTab('check')">✓ Check</button>
+                </div>
+                
+                <!-- Visualize Tab -->
+                <div id="tab-viz" class="tab-content active">
+                    <div class="panel-body">
+                        <div class="viz-buttons">
+                            <button class="btn btn-secondary" onclick="visualize('statemachine')">State Machine</button>
+                            <button class="btn btn-secondary" onclick="visualize('sequence')">Sequence</button>
+                            <button class="btn btn-secondary" onclick="visualize('pie')">Pie Chart</button>
+                            <button class="btn btn-secondary" onclick="visualize('line')">Line Chart</button>
+                        </div>
+                        <div id="vizOutput" class="mermaid-output">
+                            <div style="color: var(--text-secondary); text-align: center;">
+                                Select a visualization type above
+                            </div>
+                        </div>
                     </div>
                 </div>
-                <div class="panel-body">
-                    <textarea id="specEditor" class="editor" placeholder="% Enter your Prolog specification here...
+                
+                <!-- Prolog Spec Tab -->
+                <div id="tab-spec" class="tab-content">
+                    <div class="panel-body">
+                        <textarea id="specEditor" class="editor" placeholder="% Enter your Prolog specification here...
 
 % Example state machine:
 state(idle, [waiting]).
@@ -401,38 +433,15 @@ initial(idle).
 transition(idle, start, busy).
 transition(busy, done, idle).
 "></textarea>
-                    <div class="examples">
-                        <span style="color: var(--text-secondary); font-size: 0.85rem;">Examples: </span>
-                        <button class="btn btn-secondary example-btn" onclick="loadExample('mutex')">Mutex</button>
-                        <button class="btn btn-secondary example-btn" onclick="loadExample('channel')">Channel</button>
-                        <button class="btn btn-secondary example-btn" onclick="loadExample('sequence')">Sequence</button>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Right Panel: Interaction -->
-            <div class="panel">
-                <div class="tabs">
-                    <button class="tab" onclick="switchTab('chat')">💬 Chat</button>
-                    <button class="tab" onclick="switchTab('query')">🔍 Query</button>
-                    <button class="tab" onclick="switchTab('check')">✓ Check</button>
-                    <button class="tab active" onclick="switchTab('viz')">📊 Visualize</button>
-                </div>
-                
-                <!-- Chat Tab -->
-                <div id="tab-chat" class="tab-content">
-                    <div class="panel-body">
-                        <div id="chatMessages" class="chat-messages">
-                            <div class="message assistant">
-                                <div class="message-label">Turducken</div>
-                                Describe the system you want to model, and I'll generate a Prolog specification. 
-                                You can ask me to model state machines, protocols, processes, or any system with temporal properties.
-                            </div>
-                        </div>
-                        <textarea id="chatInput" rows="3" placeholder="Describe your system or ask a question..."></textarea>
                         <div class="btn-group">
-                            <button class="btn btn-primary" onclick="sendChat()">Send</button>
-                            <button class="btn btn-secondary" onclick="clearChat()">Clear</button>
+                            <button class="btn btn-primary" onclick="applySpec()">Apply Spec</button>
+                            <button class="btn btn-secondary" onclick="resetEngine()">Reset</button>
+                        </div>
+                        <div class="examples">
+                            <span style="color: var(--text-secondary); font-size: 0.85rem;">Examples: </span>
+                            <button class="btn btn-secondary example-btn" onclick="loadExample('mutex')">Mutex</button>
+                            <button class="btn btn-secondary example-btn" onclick="loadExample('channel')">Channel</button>
+                            <button class="btn btn-secondary example-btn" onclick="loadExample('sequence')">Sequence</button>
                         </div>
                     </div>
                 </div>
@@ -472,20 +481,26 @@ transition(busy, done, idle).
                         </div>
                     </div>
                 </div>
-                
-                <!-- Visualize Tab -->
-                <div id="tab-viz" class="tab-content active">
-                    <div class="panel-body">
-                        <div class="btn-group" style="margin-bottom: 12px;">
-                            <button class="btn btn-secondary" onclick="visualize('statemachine')">State Machine</button>
-                            <button class="btn btn-secondary" onclick="visualize('sequence')">Sequence</button>
-                            <button class="btn btn-secondary" onclick="visualize('pie')">Pie Chart</button>
-                            <button class="btn btn-secondary" onclick="visualize('line')">Line Chart</button>
+            </div>
+            
+            <!-- Right Panel: Chat Only -->
+            <div class="panel">
+                <div class="panel-header">
+                    <span class="panel-title">💬 Chat</span>
+                    <button class="btn btn-secondary" onclick="clearChat()" style="padding: 4px 12px;">Clear</button>
+                </div>
+                <div class="panel-body chat-container">
+                    <div id="chatMessages" class="chat-messages">
+                        <div class="message assistant">
+                            <div class="message-label">Turducken</div>
+                            Describe the system you want to model, and I'll generate a Prolog specification. 
+                            You can ask me to model state machines, protocols, processes, or any system with temporal properties.
                         </div>
-                        <div id="vizOutput" class="mermaid-output">
-                            <div style="color: var(--text-secondary); text-align: center;">
-                                Select a visualization type above
-                            </div>
+                    </div>
+                    <div class="chat-input-area">
+                        <textarea id="chatInput" rows="3" placeholder="Describe your system or ask a question..."></textarea>
+                        <div class="btn-group">
+                            <button class="btn btn-primary" onclick="sendChat()">Send</button>
                         </div>
                     </div>
                 </div>
@@ -535,6 +550,8 @@ transition(busy, done, idle).
                 
                 if (data.success) {
                     setStatus('success', 'Spec loaded');
+                    // Auto-switch to viz tab after applying
+                    switchTab('viz');
                 } else {
                     setStatus('error', 'Error: ' + data.error);
                 }
@@ -626,6 +643,14 @@ transition(busy, done, idle).
             input.value = '';
             messages.scrollTop = messages.scrollHeight;
             
+            // Show loading
+            const loadingId = 'loading-' + Date.now();
+            messages.innerHTML += `<div id="${loadingId}" class="message assistant">
+                <div class="message-label">Turducken</div>
+                <div class="loading"></div> Thinking...
+            </div>`;
+            messages.scrollTop = messages.scrollHeight;
+            
             try {
                 const resp = await fetch('/api/chat', {
                     method: 'POST',
@@ -637,18 +662,27 @@ transition(busy, done, idle).
                 });
                 const data = await resp.json();
                 
+                // Remove loading message
+                document.getElementById(loadingId)?.remove();
+                
                 if (data.success) {
                     messages.innerHTML += `<div class="message assistant">
                         <div class="message-label">Turducken</div>
                         ${formatResponse(data.response)}
                     </div>`;
                     
-                    // If there's Prolog code, offer to apply it
+                    // If there's Prolog code, auto-populate the editor
                     if (data.prolog) {
-                        messages.innerHTML += `<div class="message assistant">
-                            <button class="btn btn-success" onclick="applyExtracted(\`${escapeBackticks(data.prolog)}\`)">
-                                Apply Generated Spec
+                        document.getElementById('specEditor').value = data.prolog;
+                        
+                        // Add apply button
+                        messages.innerHTML += `<div class="message assistant" style="padding: 8px 12px;">
+                            <button class="btn btn-success" onclick="applyAndVisualize()">
+                                ✓ Apply Spec & Visualize
                             </button>
+                            <span style="color: var(--text-secondary); font-size: 0.85rem; margin-left: 8px;">
+                                Prolog populated in editor
+                            </span>
                         </div>`;
                     }
                 } else {
@@ -658,6 +692,7 @@ transition(busy, done, idle).
                     </div>`;
                 }
             } catch (err) {
+                document.getElementById(loadingId)?.remove();
                 messages.innerHTML += `<div class="message assistant">
                     <div class="message-label">Error</div>
                     ${err.message}
@@ -667,9 +702,10 @@ transition(busy, done, idle).
             messages.scrollTop = messages.scrollHeight;
         }
         
-        function applyExtracted(code) {
-            document.getElementById('specEditor').value = code;
-            applySpec();
+        async function applyAndVisualize() {
+            await applySpec();
+            switchTab('viz');
+            visualize('statemachine');
         }
         
         function clearChat() {
@@ -797,7 +833,6 @@ transition(busy, done, idle).
             }
             
             let code = 'xychart-beta\n    title "Data"\n';
-            // Build from series data
             return code;
         }
         
@@ -868,7 +903,7 @@ transition(responding, response, idle).`
         
         function loadExample(name) {
             document.getElementById('specEditor').value = examples[name];
-            applySpec();
+            switchTab('spec');
         }
         
         // Utility functions
@@ -904,6 +939,7 @@ transition(responding, response, idle).`
                 .replace(/```prolog\n([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
                 .replace(/```\n([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
                 .replace(/`([^`]+)`/g, '<code>$1</code>')
+                .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
                 .replace(/\n/g, '<br>');
         }
         
@@ -947,10 +983,11 @@ transition(responding, response, idle).`
             if (e.ctrlKey || e.metaKey) {
                 if (e.key === 'Enter') {
                     e.preventDefault();
-                    if (document.getElementById('tab-chat').classList.contains('active')) {
-                        sendChat();
-                    } else if (document.getElementById('tab-query').classList.contains('active')) {
+                    const activeTab = document.querySelector('.tab-content.active');
+                    if (activeTab?.id === 'tab-query') {
                         runQuery();
+                    } else {
+                        sendChat();
                     }
                 }
             }
@@ -968,6 +1005,14 @@ transition(responding, response, idle).`
             if (e.key === 'Enter') {
                 e.preventDefault();
                 checkProperty();
+            }
+        });
+        
+        // Ctrl+Enter in chat
+        document.getElementById('chatInput').addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                sendChat();
             }
         });
     </script>
