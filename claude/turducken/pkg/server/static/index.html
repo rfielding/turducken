@@ -1,0 +1,975 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Turducken - Formal Methods in Prolog</title>
+    <style>
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --border-color: #30363d;
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --accent-blue: #58a6ff;
+            --accent-green: #3fb950;
+            --accent-red: #f85149;
+            --accent-yellow: #d29922;
+            --accent-purple: #a371f7;
+        }
+        
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        
+        h1 {
+            font-size: 1.8rem;
+            color: var(--accent-blue);
+        }
+        
+        h1 span {
+            color: var(--text-secondary);
+            font-weight: normal;
+            font-size: 1rem;
+        }
+        
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .status-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--accent-green);
+        }
+        
+        .status-indicator.error {
+            background: var(--accent-red);
+        }
+        
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        
+        @media (max-width: 1000px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .panel {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border-color);
+        }
+        
+        .panel-title {
+            font-weight: 600;
+            font-size: 0.95rem;
+        }
+        
+        .panel-body {
+            padding: 16px;
+        }
+        
+        .tabs {
+            display: flex;
+            gap: 4px;
+            padding: 8px 16px;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border-color);
+        }
+        
+        .tab {
+            padding: 8px 16px;
+            border: none;
+            background: transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            transition: all 0.2s;
+        }
+        
+        .tab:hover {
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+        }
+        
+        .tab.active {
+            background: var(--accent-blue);
+            color: white;
+        }
+        
+        textarea, input[type="text"] {
+            width: 100%;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            border-radius: 6px;
+            padding: 12px;
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 0.9rem;
+            resize: vertical;
+        }
+        
+        textarea:focus, input[type="text"]:focus {
+            outline: none;
+            border-color: var(--accent-blue);
+        }
+        
+        .editor {
+            min-height: 400px;
+        }
+        
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        
+        .btn-primary {
+            background: var(--accent-blue);
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #4393e6;
+        }
+        
+        .btn-secondary {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+        }
+        
+        .btn-secondary:hover {
+            background: var(--border-color);
+        }
+        
+        .btn-danger {
+            background: var(--accent-red);
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background: #d73a3a;
+        }
+        
+        .btn-success {
+            background: var(--accent-green);
+            color: white;
+        }
+        
+        .btn-group {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+        }
+        
+        .output {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 12px;
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 0.85rem;
+            min-height: 150px;
+            max-height: 400px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+        
+        .output.success {
+            border-color: var(--accent-green);
+        }
+        
+        .output.error {
+            border-color: var(--accent-red);
+            color: var(--accent-red);
+        }
+        
+        .chat-messages {
+            max-height: 300px;
+            overflow-y: auto;
+            margin-bottom: 12px;
+        }
+        
+        .message {
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+        }
+        
+        .message.user {
+            background: var(--bg-tertiary);
+            margin-left: 40px;
+        }
+        
+        .message.assistant {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            margin-right: 40px;
+        }
+        
+        .message-label {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+        }
+        
+        .viz-container {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 20px;
+            min-height: 300px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .viz-container svg {
+            max-width: 100%;
+            max-height: 400px;
+        }
+        
+        .property-check {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        
+        .property-check input {
+            flex: 1;
+        }
+        
+        .check-result {
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-weight: 500;
+        }
+        
+        .check-result.satisfied {
+            background: rgba(63, 185, 80, 0.2);
+            color: var(--accent-green);
+        }
+        
+        .check-result.unsatisfied {
+            background: rgba(248, 81, 73, 0.2);
+            color: var(--accent-red);
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        .mermaid-output {
+            background: var(--bg-primary);
+            padding: 20px;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            overflow-x: auto;
+        }
+        
+        /* Mermaid dark theme overrides */
+        .mermaid {
+            background: transparent;
+        }
+        
+        pre code {
+            display: block;
+            padding: 12px;
+            background: var(--bg-primary);
+            border-radius: 6px;
+            overflow-x: auto;
+        }
+        
+        .loading {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid var(--border-color);
+            border-top-color: var(--accent-blue);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .help-text {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            margin-top: 8px;
+        }
+        
+        .examples {
+            margin-top: 12px;
+        }
+        
+        .example-btn {
+            font-size: 0.8rem;
+            padding: 4px 8px;
+            margin-right: 4px;
+            margin-bottom: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Turducken <span>Formal Methods in Prolog</span></h1>
+            <div class="status">
+                <select id="providerSelect" class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.85rem;" onchange="switchProvider()">
+                    <option value="openai">ChatGPT</option>
+                    <option value="anthropic">Claude</option>
+                </select>
+                <div class="status-indicator" id="statusIndicator"></div>
+                <span id="statusText">Ready</span>
+            </div>
+        </header>
+        
+        <div class="main-grid">
+            <!-- Left Panel: Specification Editor -->
+            <div class="panel">
+                <div class="panel-header">
+                    <span class="panel-title">📝 Prolog Specification</span>
+                    <div class="btn-group" style="margin: 0;">
+                        <button class="btn btn-primary" onclick="applySpec()">Apply</button>
+                        <button class="btn btn-secondary" onclick="resetEngine()">Reset</button>
+                    </div>
+                </div>
+                <div class="panel-body">
+                    <textarea id="specEditor" class="editor" placeholder="% Enter your Prolog specification here...
+
+% Example state machine:
+state(idle, [waiting]).
+state(busy, [processing]).
+initial(idle).
+transition(idle, start, busy).
+transition(busy, done, idle).
+"></textarea>
+                    <div class="examples">
+                        <span style="color: var(--text-secondary); font-size: 0.85rem;">Examples: </span>
+                        <button class="btn btn-secondary example-btn" onclick="loadExample('mutex')">Mutex</button>
+                        <button class="btn btn-secondary example-btn" onclick="loadExample('channel')">Channel</button>
+                        <button class="btn btn-secondary example-btn" onclick="loadExample('sequence')">Sequence</button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Right Panel: Interaction -->
+            <div class="panel">
+                <div class="tabs">
+                    <button class="tab" onclick="switchTab('chat')">💬 Chat</button>
+                    <button class="tab" onclick="switchTab('query')">🔍 Query</button>
+                    <button class="tab" onclick="switchTab('check')">✓ Check</button>
+                    <button class="tab active" onclick="switchTab('viz')">📊 Visualize</button>
+                </div>
+                
+                <!-- Chat Tab -->
+                <div id="tab-chat" class="tab-content">
+                    <div class="panel-body">
+                        <div id="chatMessages" class="chat-messages">
+                            <div class="message assistant">
+                                <div class="message-label">Turducken</div>
+                                Describe the system you want to model, and I'll generate a Prolog specification. 
+                                You can ask me to model state machines, protocols, processes, or any system with temporal properties.
+                            </div>
+                        </div>
+                        <textarea id="chatInput" rows="3" placeholder="Describe your system or ask a question..."></textarea>
+                        <div class="btn-group">
+                            <button class="btn btn-primary" onclick="sendChat()">Send</button>
+                            <button class="btn btn-secondary" onclick="clearChat()">Clear</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Query Tab -->
+                <div id="tab-query" class="tab-content">
+                    <div class="panel-body">
+                        <input type="text" id="queryInput" placeholder="Enter Prolog query (e.g., transition(X, Y, Z).)">
+                        <div class="btn-group">
+                            <button class="btn btn-primary" onclick="runQuery()">Run Query</button>
+                        </div>
+                        <div class="help-text">
+                            Try: <code>transition(X, _, Y).</code> or <code>initial(X).</code>
+                        </div>
+                        <h4 style="margin: 16px 0 8px 0; color: var(--text-secondary);">Result:</h4>
+                        <div id="queryOutput" class="output"></div>
+                    </div>
+                </div>
+                
+                <!-- Check Tab -->
+                <div id="tab-check" class="tab-content">
+                    <div class="panel-body">
+                        <div class="property-check">
+                            <input type="text" id="propertyInput" placeholder="CTL formula (e.g., ef(atom(done)))">
+                            <button class="btn btn-primary" onclick="checkProperty()">Check</button>
+                        </div>
+                        <div class="help-text">
+                            CTL operators: <code>ef</code>, <code>af</code>, <code>eg</code>, <code>ag</code>, <code>ex</code>, <code>ax</code>, <code>eu</code>, <code>au</code><br>
+                            Combinators: <code>atom(p)</code>, <code>not(φ)</code>, <code>and(φ,ψ)</code>, <code>or(φ,ψ)</code>
+                        </div>
+                        <div id="checkResult"></div>
+                        <h4 style="margin: 16px 0 8px 0; color: var(--text-secondary);">Examples:</h4>
+                        <div>
+                            <button class="btn btn-secondary example-btn" onclick="setProperty('ef(atom(done))')">EF done</button>
+                            <button class="btn btn-secondary example-btn" onclick="setProperty('ag(not(atom(error)))')">AG ¬error</button>
+                            <button class="btn btn-secondary example-btn" onclick="setProperty('af(atom(complete))')">AF complete</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Visualize Tab -->
+                <div id="tab-viz" class="tab-content active">
+                    <div class="panel-body">
+                        <div class="btn-group" style="margin-bottom: 12px;">
+                            <button class="btn btn-secondary" onclick="visualize('statemachine')">State Machine</button>
+                            <button class="btn btn-secondary" onclick="visualize('sequence')">Sequence</button>
+                            <button class="btn btn-secondary" onclick="visualize('pie')">Pie Chart</button>
+                            <button class="btn btn-secondary" onclick="visualize('line')">Line Chart</button>
+                        </div>
+                        <div id="vizOutput" class="mermaid-output">
+                            <div style="color: var(--text-secondary); text-align: center;">
+                                Select a visualization type above
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <script>
+        // Initialize Mermaid with dark theme
+        mermaid.initialize({
+            startOnLoad: false,
+            theme: 'dark',
+            themeVariables: {
+                darkMode: true,
+                background: '#0d1117',
+                primaryColor: '#58a6ff',
+                primaryTextColor: '#e6edf3',
+                primaryBorderColor: '#30363d',
+                lineColor: '#8b949e',
+                secondaryColor: '#21262d',
+                tertiaryColor: '#161b22'
+            }
+        });
+        
+        // Tab switching
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+            
+            document.querySelector(`[onclick="switchTab('${tabName}')"]`).classList.add('active');
+            document.getElementById(`tab-${tabName}`).classList.add('active');
+        }
+        
+        // API calls
+        async function applySpec() {
+            const source = document.getElementById('specEditor').value;
+            setStatus('loading', 'Applying...');
+            
+            try {
+                const resp = await fetch('/api/spec', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ source })
+                });
+                const data = await resp.json();
+                
+                if (data.success) {
+                    setStatus('success', 'Spec loaded');
+                } else {
+                    setStatus('error', 'Error: ' + data.error);
+                }
+            } catch (err) {
+                setStatus('error', 'Failed: ' + err.message);
+            }
+        }
+        
+        async function resetEngine() {
+            try {
+                await fetch('/api/reset', { method: 'POST' });
+                setStatus('success', 'Reset complete');
+            } catch (err) {
+                setStatus('error', 'Reset failed');
+            }
+        }
+        
+        async function runQuery() {
+            const query = document.getElementById('queryInput').value;
+            const output = document.getElementById('queryOutput');
+            
+            if (!query) {
+                output.textContent = 'Enter a query';
+                return;
+            }
+            
+            try {
+                const resp = await fetch('/api/query', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query })
+                });
+                const data = await resp.json();
+                
+                output.className = 'output ' + (data.success ? 'success' : 'error');
+                output.textContent = data.success ? data.result : 'Error: ' + data.error;
+            } catch (err) {
+                output.className = 'output error';
+                output.textContent = 'Failed: ' + err.message;
+            }
+        }
+        
+        async function checkProperty() {
+            const property = document.getElementById('propertyInput').value;
+            const resultDiv = document.getElementById('checkResult');
+            
+            if (!property) {
+                resultDiv.innerHTML = '';
+                return;
+            }
+            
+            try {
+                const resp = await fetch('/api/check', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ property })
+                });
+                const data = await resp.json();
+                
+                if (data.success) {
+                    resultDiv.innerHTML = `<div class="check-result ${data.satisfied ? 'satisfied' : 'unsatisfied'}">
+                        ${data.satisfied ? '✓ Property SATISFIED' : '✗ Property NOT satisfied'}
+                    </div>`;
+                } else {
+                    resultDiv.innerHTML = `<div class="check-result unsatisfied">Error: ${data.error}</div>`;
+                }
+            } catch (err) {
+                resultDiv.innerHTML = `<div class="check-result unsatisfied">Failed: ${err.message}</div>`;
+            }
+        }
+        
+        function setProperty(prop) {
+            document.getElementById('propertyInput').value = prop;
+        }
+        
+        async function sendChat() {
+            const input = document.getElementById('chatInput');
+            const messages = document.getElementById('chatMessages');
+            const message = input.value.trim();
+            
+            if (!message) return;
+            
+            // Add user message
+            messages.innerHTML += `<div class="message user">
+                <div class="message-label">You</div>
+                ${escapeHtml(message)}
+            </div>`;
+            
+            input.value = '';
+            messages.scrollTop = messages.scrollHeight;
+            
+            try {
+                const resp = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        message,
+                        context: document.getElementById('specEditor').value
+                    })
+                });
+                const data = await resp.json();
+                
+                if (data.success) {
+                    messages.innerHTML += `<div class="message assistant">
+                        <div class="message-label">Turducken</div>
+                        ${formatResponse(data.response)}
+                    </div>`;
+                    
+                    // If there's Prolog code, offer to apply it
+                    if (data.prolog) {
+                        messages.innerHTML += `<div class="message assistant">
+                            <button class="btn btn-success" onclick="applyExtracted(\`${escapeBackticks(data.prolog)}\`)">
+                                Apply Generated Spec
+                            </button>
+                        </div>`;
+                    }
+                } else {
+                    messages.innerHTML += `<div class="message assistant">
+                        <div class="message-label">Error</div>
+                        ${data.error}
+                    </div>`;
+                }
+            } catch (err) {
+                messages.innerHTML += `<div class="message assistant">
+                    <div class="message-label">Error</div>
+                    ${err.message}
+                </div>`;
+            }
+            
+            messages.scrollTop = messages.scrollHeight;
+        }
+        
+        function applyExtracted(code) {
+            document.getElementById('specEditor').value = code;
+            applySpec();
+        }
+        
+        function clearChat() {
+            document.getElementById('chatMessages').innerHTML = `<div class="message assistant">
+                <div class="message-label">Turducken</div>
+                Describe the system you want to model, and I'll generate a Prolog specification.
+            </div>`;
+        }
+        
+        async function visualize(type) {
+            const output = document.getElementById('vizOutput');
+            output.innerHTML = '<div class="loading"></div>';
+            
+            try {
+                const resp = await fetch(`/api/visualize?type=${type}`);
+                const data = await resp.json();
+                
+                let mermaidCode = '';
+                
+                switch (type) {
+                    case 'statemachine':
+                        mermaidCode = generateStateMachineMermaid(data.stateMachine);
+                        break;
+                    case 'sequence':
+                        mermaidCode = generateSequenceMermaid(data.sequence);
+                        break;
+                    case 'pie':
+                        mermaidCode = generatePieMermaid(data.pie);
+                        break;
+                    case 'line':
+                        mermaidCode = generateLineMermaid(data.line);
+                        break;
+                }
+                
+                if (mermaidCode) {
+                    output.innerHTML = `<pre class="mermaid">${mermaidCode}</pre>`;
+                    mermaid.run();
+                } else {
+                    output.innerHTML = '<div style="color: var(--text-secondary);">No data to visualize. Load a specification first.</div>';
+                }
+            } catch (err) {
+                output.innerHTML = `<div style="color: var(--accent-red);">Error: ${err.message}</div>`;
+            }
+        }
+        
+        function generateStateMachineMermaid(data) {
+            if (!data || !data.states || data.states.length === 0) {
+                return `stateDiagram-v2
+    [*] --> idle
+    idle --> busy: start
+    busy --> idle: done`;
+            }
+            
+            let code = 'stateDiagram-v2\n';
+            
+            if (data.initial && data.initial.length > 0) {
+                data.initial.forEach(s => {
+                    code += `    [*] --> ${s}\n`;
+                });
+            }
+            
+            if (data.transitions) {
+                data.transitions.forEach(t => {
+                    code += `    ${t.from} --> ${t.to}: ${t.label}\n`;
+                });
+            }
+            
+            if (data.accepting && data.accepting.length > 0) {
+                data.accepting.forEach(s => {
+                    code += `    ${s} --> [*]\n`;
+                });
+            }
+            
+            return code;
+        }
+        
+        function generateSequenceMermaid(data) {
+            if (!data || !data.messages || data.messages.length === 0) {
+                return `sequenceDiagram
+    participant Client
+    participant Server
+    Client->>Server: request
+    Server-->>Client: response`;
+            }
+            
+            let code = 'sequenceDiagram\n';
+            
+            if (data.lifelines) {
+                data.lifelines.forEach(l => {
+                    code += `    participant ${l}\n`;
+                });
+            }
+            
+            if (data.messages) {
+                data.messages.forEach(m => {
+                    code += `    ${m.from}->>${m.to}: ${m.label}\n`;
+                });
+            }
+            
+            return code;
+        }
+        
+        function generatePieMermaid(data) {
+            if (!data || !data.slices || data.slices.length === 0) {
+                return `pie title Distribution
+    "A" : 40
+    "B" : 30
+    "C" : 30`;
+            }
+            
+            let code = 'pie title Distribution\n';
+            data.slices.forEach(s => {
+                code += `    "${s.label}" : ${s.value}\n`;
+            });
+            return code;
+        }
+        
+        function generateLineMermaid(data) {
+            if (!data || !data.series || data.series.length === 0) {
+                return `xychart-beta
+    title "Sample Data"
+    x-axis [1, 2, 3, 4, 5]
+    y-axis "Value" 0 --> 100
+    line [10, 40, 30, 80, 60]`;
+            }
+            
+            let code = 'xychart-beta\n    title "Data"\n';
+            // Build from series data
+            return code;
+        }
+        
+        // Example specifications
+        const examples = {
+            mutex: `% Mutual Exclusion Protocol
+state(free, [available]).
+state(locked, [busy]).
+
+initial(free).
+
+transition(free, acquire, locked).
+transition(locked, release, free).
+
+prop(free, available).
+prop(locked, busy).
+
+% Safety: can always eventually release
+% check_ctl(ag(ef(atom(available)))).`,
+
+            channel: `% Buffered Channel (CSP style)
+state(empty, [can_send]).
+state(has_one, [can_send, can_recv]).
+state(full, [can_recv]).
+
+initial(empty).
+
+% Send fills buffer
+transition(empty, send, has_one).
+transition(has_one, send, full).
+
+% Recv empties buffer
+transition(full, recv, has_one).
+transition(has_one, recv, empty).
+
+prop(empty, can_send).
+prop(has_one, can_send).
+prop(has_one, can_recv).
+prop(full, can_recv).
+
+% Property: from any reachable state, we can get back to empty
+% check_ctl(ag(ef(atom(can_send)))).`,
+
+            sequence: `% Request-Response Protocol
+lifeline(client).
+lifeline(server).
+lifeline(database).
+
+message(1, client, server, request).
+message(2, server, database, query).
+message(3, database, server, result).
+message(4, server, client, response).
+
+% Also model as state machine
+state(idle, []).
+state(requesting, []).
+state(querying, []).
+state(responding, []).
+
+initial(idle).
+accepting(idle).
+
+transition(idle, request, requesting).
+transition(requesting, query, querying).
+transition(querying, result, responding).
+transition(responding, response, idle).`
+        };
+        
+        function loadExample(name) {
+            document.getElementById('specEditor').value = examples[name];
+            applySpec();
+        }
+        
+        // Utility functions
+        function setStatus(type, text) {
+            const indicator = document.getElementById('statusIndicator');
+            const statusText = document.getElementById('statusText');
+            
+            indicator.className = 'status-indicator';
+            if (type === 'error') indicator.classList.add('error');
+            statusText.textContent = text;
+            
+            if (type !== 'loading') {
+                setTimeout(() => {
+                    indicator.className = 'status-indicator';
+                    statusText.textContent = 'Ready';
+                }, 3000);
+            }
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        function escapeBackticks(text) {
+            return text.replace(/`/g, '\\`');
+        }
+        
+        function formatResponse(text) {
+            // Convert markdown code blocks to HTML
+            return text
+                .replace(/```prolog\n([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
+                .replace(/```\n([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
+                .replace(/`([^`]+)`/g, '<code>$1</code>')
+                .replace(/\n/g, '<br>');
+        }
+        
+        // Provider management
+        async function loadProvider() {
+            try {
+                const resp = await fetch('/api/provider');
+                const data = await resp.json();
+                const select = document.getElementById('providerSelect');
+                select.value = data.provider;
+                if (!data.hasKey) {
+                    setStatus('warning', 'No API key configured');
+                }
+            } catch (err) {
+                console.error('Failed to load provider:', err);
+            }
+        }
+        
+        async function switchProvider() {
+            const provider = document.getElementById('providerSelect').value;
+            try {
+                const resp = await fetch('/api/provider', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ provider })
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    setStatus('success', 'Using ' + data.name);
+                }
+            } catch (err) {
+                setStatus('error', 'Failed to switch provider');
+            }
+        }
+        
+        // Initialize on page load
+        loadProvider();
+        
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            if (e.ctrlKey || e.metaKey) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (document.getElementById('tab-chat').classList.contains('active')) {
+                        sendChat();
+                    } else if (document.getElementById('tab-query').classList.contains('active')) {
+                        runQuery();
+                    }
+                }
+            }
+        });
+        
+        // Enter to submit in query input
+        document.getElementById('queryInput').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                runQuery();
+            }
+        });
+        
+        document.getElementById('propertyInput').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                checkProperty();
+            }
+        });
+    </script>
+</body>
+</html>
