@@ -559,6 +559,98 @@ type Transition struct {
 	To    string `json:"to"`
 }
 
+// Property represents a named CTL property
+type Property struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Formula     string `json:"formula"`
+}
+
+// GetProperties extracts named properties from the spec
+func (e *Engine) GetProperties(ctx context.Context) ([]Property, error) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	var properties []Property
+
+	sols, err := e.interpreter.QueryContext(ctx, "property(Name, Desc, Formula).")
+	if err == nil {
+		for sols.Next() {
+			var result struct {
+				Name    interface{}
+				Desc    interface{}
+				Formula interface{}
+			}
+			if err := sols.Scan(&result); err == nil {
+				properties = append(properties, Property{
+					Name:        termToString(result.Name),
+					Description: termToString(result.Desc),
+					Formula:     termToString(result.Formula),
+				})
+			}
+		}
+		sols.Close()
+	}
+
+	return properties, nil
+}
+
+// Doc represents a documentation entry
+type Doc struct {
+	Topic   string `json:"topic"`
+	Content string `json:"content"`
+}
+
+// GetDocs extracts documentation from the spec
+func (e *Engine) GetDocs(ctx context.Context) ([]Doc, error) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	var docs []Doc
+
+	sols, err := e.interpreter.QueryContext(ctx, "doc(Topic, Content).")
+	if err == nil {
+		for sols.Next() {
+			var result struct {
+				Topic   interface{}
+				Content interface{}
+			}
+			if err := sols.Scan(&result); err == nil {
+				docs = append(docs, Doc{
+					Topic:   termToString(result.Topic),
+					Content: termToString(result.Content),
+				})
+			}
+		}
+		sols.Close()
+	}
+
+	return docs, nil
+}
+
+// GetActors extracts actor definitions
+func (e *Engine) GetActors(ctx context.Context) ([]string, error) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	var actors []string
+
+	sols, err := e.interpreter.QueryContext(ctx, "actor(Name, _).")
+	if err == nil {
+		for sols.Next() {
+			var result struct {
+				Name interface{}
+			}
+			if err := sols.Scan(&result); err == nil {
+				actors = append(actors, termToString(result.Name))
+			}
+		}
+		sols.Close()
+	}
+
+	return actors, nil
+}
+
 // GetSource returns the current specification source
 func (e *Engine) GetSource() string {
 	e.mu.RLock()

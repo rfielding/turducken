@@ -32,13 +32,13 @@ func New(specFile string) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("creating prolog engine: %w", err)
 	}
-	
+
 	s := &Server{
 		engine:   engine,
 		llm:      llm.New(),
 		specFile: specFile,
 	}
-	
+
 	// Load spec file if provided
 	if specFile != "" {
 		content, err := os.ReadFile(specFile)
@@ -49,14 +49,14 @@ func New(specFile string) (*Server, error) {
 			return nil, fmt.Errorf("loading spec: %w", err)
 		}
 	}
-	
+
 	return s, nil
 }
 
 // ListenAndServe starts the HTTP server
 func (s *Server) ListenAndServe(addr string) error {
 	mux := http.NewServeMux()
-	
+
 	// API endpoints
 	mux.HandleFunc("/api/spec", s.handleSpec)
 	mux.HandleFunc("/api/query", s.handleQuery)
@@ -65,30 +65,33 @@ func (s *Server) ListenAndServe(addr string) error {
 	mux.HandleFunc("/api/check", s.handleCheck)
 	mux.HandleFunc("/api/reset", s.handleReset)
 	mux.HandleFunc("/api/provider", s.handleProvider)
-	
+	mux.HandleFunc("/api/properties", s.handleProperties)
+	mux.HandleFunc("/api/docs", s.handleDocs)
+	mux.HandleFunc("/api/actors", s.handleActors)
+
 	// Static files (embedded)
 	mux.HandleFunc("/", s.handleStatic)
-	
+
 	return http.ListenAndServe(addr, mux)
 }
 
 // handleSpec handles GET/POST for the Prolog specification
 func (s *Server) handleSpec(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	switch r.Method {
 	case http.MethodGet:
 		json.NewEncoder(w).Encode(map[string]string{
 			"source": s.engine.GetSource(),
 		})
-		
+
 	case http.MethodPost:
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		
+
 		var req struct {
 			Source string `json:"source"`
 		}
@@ -96,7 +99,7 @@ func (s *Server) handleSpec(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		
+
 		// Reset and reload
 		if err := s.engine.Reset(); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -104,16 +107,18 @@ func (s *Server) handleSpec(w http.ResponseWriter, r *http.Request) {
 		}
 		if err := s.engine.LoadSpec(req.Source); err != nil {
 			json.NewEncoder(w).Encode(map[string]interface{}{
-				"success": false,
-				"error":   err.Error(),
+				"success":    false,
+				"error":      err.Error(),
+				"source":     req.Source, // Return source for retry
+				"canAutoFix": true,       // Signal UI can try auto-fix
 			})
 			return
 		}
-		
+
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": true,
 		})
-		
+
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -125,9 +130,9 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	var req struct {
 		Query string `json:"query"`
 	}
@@ -135,10 +140,10 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	
+
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	
+
 	result, err := s.engine.RawQuery(ctx, req.Query)
 	if err != nil {
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -147,7 +152,7 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	
+
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"result":  result,
@@ -160,19 +165,19 @@ func (s *Server) handleVisualize(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	visType := r.URL.Query().Get("type")
 	if visType == "" {
 		visType = "all"
 	}
-	
+
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	
+
 	result := make(map[string]interface{})
-	
+
 	if visType == "statemachine" || visType == "all" {
 		sm, err := s.extractStateMachine(ctx)
 		if err != nil {
@@ -181,7 +186,7 @@ func (s *Server) handleVisualize(w http.ResponseWriter, r *http.Request) {
 			result["stateMachine"] = sm
 		}
 	}
-	
+
 	if visType == "sequence" || visType == "all" {
 		seq, err := s.extractSequence(ctx)
 		if err != nil {
@@ -190,7 +195,7 @@ func (s *Server) handleVisualize(w http.ResponseWriter, r *http.Request) {
 			result["sequence"] = seq
 		}
 	}
-	
+
 	if visType == "pie" || visType == "all" {
 		pie, err := s.extractPie(ctx)
 		if err != nil {
@@ -199,7 +204,7 @@ func (s *Server) handleVisualize(w http.ResponseWriter, r *http.Request) {
 			result["pie"] = pie
 		}
 	}
-	
+
 	if visType == "line" || visType == "all" {
 		line, err := s.extractLine(ctx)
 		if err != nil {
@@ -208,7 +213,7 @@ func (s *Server) handleVisualize(w http.ResponseWriter, r *http.Request) {
 			result["line"] = line
 		}
 	}
-	
+
 	json.NewEncoder(w).Encode(result)
 }
 
@@ -217,7 +222,7 @@ func (s *Server) extractStateMachine(ctx context.Context) (map[string]interface{
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Convert transitions to map format for JSON
 	transitions := make([]map[string]string, len(sm.Transitions))
 	for i, t := range sm.Transitions {
@@ -227,7 +232,7 @@ func (s *Server) extractStateMachine(ctx context.Context) (map[string]interface{
 			"to":    t.To,
 		}
 	}
-	
+
 	return map[string]interface{}{
 		"states":      sm.States,
 		"transitions": transitions,
@@ -241,7 +246,7 @@ func (s *Server) extractSequence(ctx context.Context) (map[string]interface{}, e
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Convert messages to map format for JSON
 	messages := make([]map[string]interface{}, len(seq.Messages))
 	for i, m := range seq.Messages {
@@ -252,7 +257,7 @@ func (s *Server) extractSequence(ctx context.Context) (map[string]interface{}, e
 			"label": m.Label,
 		}
 	}
-	
+
 	return map[string]interface{}{
 		"lifelines": seq.Lifelines,
 		"messages":  messages,
@@ -264,7 +269,7 @@ func (s *Server) extractPie(ctx context.Context) (map[string]interface{}, error)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Convert to map format for JSON
 	sliceData := make([]map[string]interface{}, len(slices))
 	for i, slice := range slices {
@@ -273,7 +278,7 @@ func (s *Server) extractPie(ctx context.Context) (map[string]interface{}, error)
 			"value": slice.Value,
 		}
 	}
-	
+
 	return map[string]interface{}{
 		"slices": sliceData,
 	}, nil
@@ -284,7 +289,7 @@ func (s *Server) extractLine(ctx context.Context) (map[string]interface{}, error
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Group points by series
 	seriesMap := make(map[string][]map[string]float64)
 	for _, p := range points {
@@ -293,7 +298,7 @@ func (s *Server) extractLine(ctx context.Context) (map[string]interface{}, error
 			"y": p.Y,
 		})
 	}
-	
+
 	// Convert to array format
 	var series []map[string]interface{}
 	for name, pts := range seriesMap {
@@ -302,7 +307,7 @@ func (s *Server) extractLine(ctx context.Context) (map[string]interface{}, error
 			"points": pts,
 		})
 	}
-	
+
 	return map[string]interface{}{
 		"series": series,
 	}, nil
@@ -314,9 +319,9 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	var req struct {
 		Message string `json:"message"`
 		Context string `json:"context"`
@@ -325,11 +330,11 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	
+
 	// Build prompt with current spec context
 	currentSpec := s.engine.GetSource()
 	prompt := s.llm.BuildPrompt(req.Message, currentSpec, req.Context)
-	
+
 	// Get LLM response
 	response, err := s.llm.Chat(r.Context(), prompt)
 	if err != nil {
@@ -339,10 +344,10 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	
+
 	// Extract Prolog code from response
 	prologCode := extractPrologCode(response)
-	
+
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success":  true,
 		"response": response,
@@ -356,9 +361,9 @@ func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	var req struct {
 		Property string `json:"property"`
 	}
@@ -366,13 +371,13 @@ func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	
+
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	
+
 	// Build CTL check query
 	query := fmt.Sprintf("check_ctl(%s).", req.Property)
-	
+
 	satisfied, err := s.engine.QueryOne(ctx, query)
 	if err != nil {
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -381,7 +386,7 @@ func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	
+
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success":   true,
 		"satisfied": satisfied,
@@ -394,9 +399,9 @@ func (s *Server) handleReset(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	if err := s.engine.Reset(); err != nil {
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": false,
@@ -404,7 +409,7 @@ func (s *Server) handleReset(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	
+
 	// Reload spec file if one was provided
 	if s.specFile != "" {
 		content, err := os.ReadFile(s.specFile)
@@ -412,7 +417,7 @@ func (s *Server) handleReset(w http.ResponseWriter, r *http.Request) {
 			s.engine.LoadSpec(string(content))
 		}
 	}
-	
+
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 	})
@@ -421,7 +426,7 @@ func (s *Server) handleReset(w http.ResponseWriter, r *http.Request) {
 // handleProvider handles GET/POST for LLM provider settings
 func (s *Server) handleProvider(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	switch r.Method {
 	case http.MethodGet:
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -429,7 +434,7 @@ func (s *Server) handleProvider(w http.ResponseWriter, r *http.Request) {
 			"name":     s.llm.ProviderName(),
 			"hasKey":   s.llm.HasAPIKey(),
 		})
-		
+
 	case http.MethodPost:
 		var req struct {
 			Provider string `json:"provider"`
@@ -438,7 +443,7 @@ func (s *Server) handleProvider(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		
+
 		switch req.Provider {
 		case "openai":
 			s.llm.SetProvider(llm.ProviderOpenAI)
@@ -448,16 +453,82 @@ func (s *Server) handleProvider(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Unknown provider", http.StatusBadRequest)
 			return
 		}
-		
+
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"success":  true,
 			"provider": string(s.llm.GetProvider()),
 			"name":     s.llm.ProviderName(),
 		})
-		
+
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// handleProperties returns named properties from the spec
+func (s *Server) handleProperties(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	properties, err := s.engine.GetProperties(ctx)
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":    true,
+		"properties": properties,
+	})
+}
+
+// handleDocs returns documentation from the spec
+func (s *Server) handleDocs(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	docs, err := s.engine.GetDocs(ctx)
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"docs":    docs,
+	})
+}
+
+// handleActors returns actor list from the spec
+func (s *Server) handleActors(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	actors, err := s.engine.GetActors(ctx)
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"actors":  actors,
+	})
 }
 
 // handleStatic serves static files
@@ -466,13 +537,13 @@ func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 	if path == "/" {
 		path = "/index.html"
 	}
-	
+
 	content, err := staticFiles.ReadFile("static" + path)
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	
+
 	// Set content type
 	switch {
 	case strings.HasSuffix(path, ".html"):
@@ -484,7 +555,7 @@ func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 	case strings.HasSuffix(path, ".svg"):
 		w.Header().Set("Content-Type", "image/svg+xml")
 	}
-	
+
 	w.Write(content)
 }
 
@@ -498,12 +569,12 @@ func extractPrologCode(response string) string {
 	if start == -1 {
 		return ""
 	}
-	
+
 	start = strings.Index(response[start:], "\n") + start + 1
 	end := strings.Index(response[start:], "```")
 	if end == -1 {
 		return ""
 	}
-	
+
 	return strings.TrimSpace(response[start : start+end])
 }

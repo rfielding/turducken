@@ -76,6 +76,10 @@
             background: var(--accent-red);
         }
         
+        .status-indicator.success {
+            background: var(--accent-green);
+        }
+        
         .main-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -471,6 +475,12 @@ transition(busy, done, idle).
                 <!-- Check Tab -->
                 <div id="tab-check" class="tab-content">
                     <div class="panel-body">
+                        <h4 style="margin: 0 0 12px 0; color: var(--text-primary);">Defined Properties</h4>
+                        <div id="propertyList" style="margin-bottom: 16px;">
+                            <div style="color: var(--text-secondary);">Load a spec to see defined properties</div>
+                        </div>
+                        
+                        <h4 style="margin: 16px 0 8px 0; color: var(--text-primary);">Custom Check</h4>
                         <div class="property-check">
                             <input type="text" id="propertyInput" placeholder="CTL formula (e.g., ef(atom(done)))">
                             <button class="btn btn-primary" onclick="checkProperty()">Check</button>
@@ -480,12 +490,6 @@ transition(busy, done, idle).
                             Combinators: <code>atom(p)</code>, <code>not(φ)</code>, <code>and(φ,ψ)</code>, <code>or(φ,ψ)</code>
                         </div>
                         <div id="checkResult"></div>
-                        <h4 style="margin: 16px 0 8px 0; color: var(--text-secondary);">Examples:</h4>
-                        <div>
-                            <button class="btn btn-secondary example-btn" onclick="setProperty('ef(atom(done))')">EF done</button>
-                            <button class="btn btn-secondary example-btn" onclick="setProperty('ag(not(atom(error)))')">AG ¬error</button>
-                            <button class="btn btn-secondary example-btn" onclick="setProperty('af(atom(complete))')">AF complete</button>
-                        </div>
                     </div>
                 </div>
             </div>
@@ -545,11 +549,10 @@ transition(busy, done, idle).
         // API calls
         async function applySpec() {
             const source = document.getElementById('specEditor').value;
-            setStatus('loading', 'Applying...');
-            
-            // Clear visualizations before applying
-            document.getElementById('vizOutput').innerHTML = '<div class="loading"></div>';
-            
+            await applySpecWithAutoFix(source);
+        }
+        
+        async function applySpecWithAutoFix(source, retryCount = 0) {
             try {
                 const resp = await fetch('/api/spec', {
                     method: 'POST',
@@ -559,19 +562,37 @@ transition(busy, done, idle).
                 const data = await resp.json();
                 
                 if (data.success) {
-                    setStatus('success', 'Spec loaded');
-                    // Auto-switch to viz tab after applying
-                    switchTab('viz');
-                    // Trigger visualization refresh
-                    visualize('statemachine');
+                    setStatus('Spec applied successfully!', 'success');
+                    loadProperties();  // Refresh property list
+                    return true;
+                } else if (data.canAutoFix && retryCount < MAX_AUTO_FIX_RETRIES) {
+                    setStatus(`Spec error, asking LLM to fix (attempt ${retryCount + 1}/${MAX_AUTO_FIX_RETRIES})...`, 'error');
+                    
+                    // Ask LLM to fix the error
+                    const fixResp = await fetch('/api/chat', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            message: `The following Prolog code has an error. Please fix it and return only the corrected Prolog code.\n\nError: ${data.error}\n\nCode:\n\`\`\`prolog\n${source}\n\`\`\``,
+                            context: 'fix_error'
+                        })
+                    });
+                    const fixData = await fixResp.json();
+                    
+                    if (fixData.success && fixData.prolog) {
+                        // Recursively try the fixed code
+                        return await applySpecWithAutoFix(fixData.prolog, retryCount + 1);
+                    } else {
+                        setStatus(`Auto-fix failed: ${fixData.error || 'No fixed code returned'}`, 'error');
+                        return false;
+                    }
                 } else {
-                    setStatus('error', 'Error: ' + data.error);
-                    // Show error in viz output too
-                    document.getElementById('vizOutput').innerHTML = `<div style="color: var(--accent-red);">Spec Error: ${data.error}</div>`;
+                    setStatus(`Spec error: ${data.error}`, 'error');
+                    return false;
                 }
             } catch (err) {
-                setStatus('error', 'Failed: ' + err.message);
-                document.getElementById('vizOutput').innerHTML = `<div style="color: var(--accent-red);">Failed: ${err.message}</div>`;
+                setStatus(`Failed: ${err.message}`, 'error');
+                return false;
             }
         }
         
@@ -936,78 +957,93 @@ transition(responding, response, idle).`
             switchTab('spec');
         }
         
-        // Utility functions
-        function setStatus(type, text) {
-            const indicator = document.getElementById('statusIndicator');
-            const statusText = document.getElementById('statusText');
-            
-            indicator.className = 'status-indicator';
-            if (type === 'error') indicator.classList.add('error');
-            statusText.textContent = text;
-            
-            // Only auto-clear success messages, not errors
-            if (type === 'success') {
-                setTimeout(() => {
-                    indicator.className = 'status-indicator';
-                    statusText.textContent = 'Ready';
-                }, 3000);
-            }
-        }
+        // Add these functions to the script section
+
+        const MAX_AUTO_FIX_RETRIES = 3;
         
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-        
-        function escapeBackticks(text) {
-            return text.replace(/`/g, '\\`');
-        }
-        
-        function formatResponse(text) {
-            // Convert markdown code blocks to HTML
-            return text
-                .replace(/```prolog\n([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
-                .replace(/```\n([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
-                .replace(/`([^`]+)`/g, '<code>$1</code>')
-                .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-                .replace(/\n/g, '<br>');
-        }
-        
-        // Provider management
-        async function loadProvider() {
+        async function loadProperties() {
             try {
-                const resp = await fetch('/api/provider');
+                const resp = await fetch('/api/properties');
                 const data = await resp.json();
-                const select = document.getElementById('providerSelect');
-                select.value = data.provider;
-                if (!data.hasKey) {
-                    setStatus('warning', 'No API key configured');
+                
+                const listDiv = document.getElementById('propertyList');
+                if (data.success && data.properties && data.properties.length > 0) {
+                    listDiv.innerHTML = data.properties.map(p => `
+                        <div style="margin-bottom: 8px; padding: 8px; background: var(--bg-tertiary); border-radius: 4px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <div>
+                                    <strong style="color: var(--accent-blue);">${p.name}</strong>
+                                    <div style="font-size: 0.85rem; color: var(--text-secondary);">${p.description}</div>
+                                </div>
+                                <button class="btn btn-secondary" onclick="checkNamedProperty('${p.name}', '${p.formula.replace(/'/g, "\\'")}')">Check</button>
+                            </div>
+                        </div>
+                    `).join('');
+                } else {
+                    listDiv.innerHTML = '<div style="color: var(--text-secondary);">No named properties defined in spec</div>';
                 }
             } catch (err) {
-                console.error('Failed to load provider:', err);
+                console.error('Error loading properties:', err);
             }
         }
         
-        async function switchProvider() {
-            const provider = document.getElementById('providerSelect').value;
+        async function checkNamedProperty(name, formula) {
+            document.getElementById('propertyInput').value = formula;
+            await checkProperty();
+        }
+        
+        // Modify existing applySpec to use auto-fix
+        async function applySpec() {
+            const source = document.getElementById('specEditor').value;
+            await applySpecWithAutoFix(source);
+        }
+        
+        async function applySpecWithAutoFix(source, retryCount = 0) {
             try {
-                const resp = await fetch('/api/provider', {
+                const resp = await fetch('/api/spec', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ provider })
+                    body: JSON.stringify({ source })
                 });
                 const data = await resp.json();
+                
                 if (data.success) {
-                    setStatus('success', 'Using ' + data.name);
+                    setStatus('Spec applied successfully!', 'success');
+                    loadProperties();  // Refresh property list
+                    return true;
+                } else if (data.canAutoFix && retryCount < MAX_AUTO_FIX_RETRIES) {
+                    setStatus(`Spec error, asking LLM to fix (attempt ${retryCount + 1}/${MAX_AUTO_FIX_RETRIES})...`, 'error');
+                    
+                    // Ask LLM to fix the error
+                    const fixResp = await fetch('/api/chat', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            message: `The following Prolog code has an error. Please fix it and return only the corrected Prolog code.\n\nError: ${data.error}\n\nCode:\n\`\`\`prolog\n${source}\n\`\`\``,
+                            context: 'fix_error'
+                        })
+                    });
+                    const fixData = await fixResp.json();
+                    
+                    if (fixData.success && fixData.prolog) {
+                        // Recursively try the fixed code
+                        return await applySpecWithAutoFix(fixData.prolog, retryCount + 1);
+                    } else {
+                        setStatus(`Auto-fix failed: ${fixData.error || 'No fixed code returned'}`, 'error');
+                        return false;
+                    }
+                } else {
+                    setStatus(`Spec error: ${data.error}`, 'error');
+                    return false;
                 }
             } catch (err) {
-                setStatus('error', 'Failed to switch provider');
+                setStatus(`Failed: ${err.message}`, 'error');
+                return false;
             }
         }
         
         // Initialize on page load
-        loadProvider();
+        loadProperties();
         
         // On page load, clear any stale visualization state
         window.addEventListener('load', () => {
@@ -1051,6 +1087,20 @@ transition(responding, response, idle).`
                 sendChat();
             }
         });
+        
+        function setStatus(message, type = 'info') {
+            const indicator = document.getElementById('statusIndicator');
+            const text = document.getElementById('statusText');
+            
+            text.textContent = message;
+            indicator.className = 'status-indicator';
+            
+            if (type === 'error') {
+                indicator.classList.add('error');
+            } else if (type === 'success') {
+                indicator.classList.add('success');
+            }
+        }
     </script>
 </body>
 </html>
