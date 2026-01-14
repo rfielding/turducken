@@ -968,17 +968,35 @@ transition(responding, response, idle).`
                 
                 const listDiv = document.getElementById('propertyList');
                 if (data.success && data.properties && data.properties.length > 0) {
-                    listDiv.innerHTML = data.properties.map(p => `
+                    listDiv.innerHTML = data.properties.map(p => {
+                        let statusIcon = '';
+                        let statusColor = '';
+                        if (p.error) {
+                            statusIcon = '⚠️';
+                            statusColor = 'var(--accent-yellow)';
+                        } else if (p.satisfied === true) {
+                            statusIcon = '✓';
+                            statusColor = 'var(--accent-green)';
+                        } else if (p.satisfied === false) {
+                            statusIcon = '✗';
+                            statusColor = 'var(--accent-red)';
+                        }
+                        
+                        return `
                         <div style="margin-bottom: 8px; padding: 8px; background: var(--bg-tertiary); border-radius: 4px;">
                             <div style="display: flex; justify-content: space-between; align-items: center;">
-                                <div>
-                                    <strong style="color: var(--accent-blue);">${p.name}</strong>
-                                    <div style="font-size: 0.85rem; color: var(--text-secondary);">${p.description}</div>
+                                <div style="flex: 1;">
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <span style="color: ${statusColor}; font-size: 1.2rem;">${statusIcon}</span>
+                                        <strong style="color: var(--accent-blue);">${p.name}</strong>
+                                    </div>
+                                    <div style="font-size: 0.85rem; color: var(--text-secondary); margin-left: 28px;">${p.description}</div>
+                                    ${p.error ? `<div style="font-size: 0.8rem; color: var(--accent-red); margin-left: 28px;">Error: ${p.error}</div>` : ''}
                                 </div>
-                                <button class="btn btn-secondary" onclick="checkNamedProperty('${p.name}', '${p.formula.replace(/'/g, "\\'")}')">Check</button>
+                                <button class="btn btn-secondary" onclick="checkNamedProperty('${p.name}', '${p.formula.replace(/'/g, "\\'")}')">Recheck</button>
                             </div>
                         </div>
-                    `).join('');
+                    `}).join('');
                 } else {
                     listDiv.innerHTML = '<div style="color: var(--text-secondary);">No named properties defined in spec</div>';
                 }
@@ -986,7 +1004,7 @@ transition(responding, response, idle).`
                 console.error('Error loading properties:', err);
             }
         }
-        
+
         async function checkNamedProperty(name, formula) {
             document.getElementById('propertyInput').value = formula;
             await checkProperty();

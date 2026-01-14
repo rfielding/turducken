@@ -465,11 +465,11 @@ func (s *Server) handleProvider(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleProperties returns named properties from the spec
+// handleProperties returns named properties from the spec with check results
 func (s *Server) handleProperties(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
 	properties, err := s.engine.GetProperties(ctx)
@@ -481,9 +481,36 @@ func (s *Server) handleProperties(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check each property and include results
+	type PropertyResult struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Formula     string `json:"formula"`
+		Satisfied   *bool  `json:"satisfied,omitempty"`
+		Error       string `json:"error,omitempty"`
+	}
+
+	results := make([]PropertyResult, len(properties))
+	for i, prop := range properties {
+		results[i] = PropertyResult{
+			Name:        prop.Name,
+			Description: prop.Description,
+			Formula:     prop.Formula,
+		}
+
+		// Try to check the property
+		query := fmt.Sprintf("check_ctl(%s).", prop.Formula)
+		satisfied, err := s.engine.QueryOne(ctx, query)
+		if err != nil {
+			results[i].Error = err.Error()
+		} else {
+			results[i].Satisfied = &satisfied
+		}
+	}
+
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success":    true,
-		"properties": properties,
+		"properties": results,
 	})
 }
 
