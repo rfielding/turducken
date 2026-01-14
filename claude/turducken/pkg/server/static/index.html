@@ -862,27 +862,51 @@ transition(busy, done, idle).
                 return null;
             }
             
-            // Get the first series
-            const series = data.series[0];
-            if (!series || !series.points || series.points.length === 0) {
+            // Collect all x values across all series for consistent axis
+            const allXValues = new Set();
+            data.series.forEach(series => {
+                if (series.points) {
+                    series.points.forEach(p => allXValues.add(p.x));
+                }
+            });
+            
+            if (allXValues.size === 0) {
                 return null;
             }
             
-            // Sort points by x value
-            const sortedPoints = [...series.points].sort((a, b) => a.x - b.x);
+            // Sort x values
+            const sortedX = [...allXValues].sort((a, b) => a - b);
+            const xValues = sortedX.map(x => `"${x}"`).join(', ');
             
-            // Extract x values as quoted strings and y values
-            const xValues = sortedPoints.map(p => `"${p.x}"`).join(', ');
-            const yValues = sortedPoints.map(p => p.y).join(', ');
-            const maxY = Math.max(...sortedPoints.map(p => p.y)) + 5;
+            // Find max Y across all series
+            let maxY = 0;
+            data.series.forEach(series => {
+                if (series.points) {
+                    series.points.forEach(p => {
+                        if (p.y > maxY) maxY = p.y;
+                    });
+                }
+            });
+            maxY += 5;
             
-            // Use proper xychart-beta syntax
-            const title = series.name || 'Data';
+            // Build chart with all series
             let code = `xychart-beta
-    title "${title}"
+    title "Line Chart"
     x-axis [${xValues}]
-    y-axis "Value" 0 --> ${maxY}
-    line [${yValues}]`;
+    y-axis "Value" 0 --> ${maxY}`;
+            
+            // Add each series as a line
+            data.series.forEach(series => {
+                if (series.points && series.points.length > 0) {
+                    // Create a map of x -> y for this series
+                    const pointMap = new Map();
+                    series.points.forEach(p => pointMap.set(p.x, p.y));
+                    
+                    // Generate y values aligned to the common x axis (use 0 for missing)
+                    const yValues = sortedX.map(x => pointMap.has(x) ? pointMap.get(x) : 0).join(', ');
+                    code += `\n    line [${yValues}]`;
+                }
+            });
             
             return code;
         }
@@ -1122,3 +1146,20 @@ transition(responding, response, idle).`
     </script>
 </body>
 </html>
+
+% filepath: /home/rfielding/code/turducken/claude/turducken/specs/turducken.pl
+
+% === LINE CHART ===
+line_point(messages, 1, 2).
+line_point(messages, 2, 4).
+line_point(messages, 3, 6).
+line_point(messages, 4, 8).
+line_point(messages, 5, 12).
+line_point(messages, 6, 16).
+
+line_point(errors, 1, 1).
+line_point(errors, 2, 1).
+line_point(errors, 3, 2).
+line_point(errors, 4, 1).
+line_point(errors, 5, 3).
+line_point(errors, 6, 2).
