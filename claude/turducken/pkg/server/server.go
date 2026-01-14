@@ -213,36 +213,99 @@ func (s *Server) handleVisualize(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) extractStateMachine(ctx context.Context) (map[string]interface{}, error) {
-	// Query for transitions
-	sm := map[string]interface{}{
-		"states":      []string{},
-		"transitions": []map[string]string{},
-		"initial":     []string{},
-		"accepting":   []string{},
+	sm, err := s.engine.GetStateMachine(ctx)
+	if err != nil {
+		return nil, err
 	}
-	return sm, nil
+	
+	// Convert transitions to map format for JSON
+	transitions := make([]map[string]string, len(sm.Transitions))
+	for i, t := range sm.Transitions {
+		transitions[i] = map[string]string{
+			"from":  t.From,
+			"label": t.Label,
+			"to":    t.To,
+		}
+	}
+	
+	return map[string]interface{}{
+		"states":      sm.States,
+		"transitions": transitions,
+		"initial":     sm.Initial,
+		"accepting":   sm.Accepting,
+	}, nil
 }
 
 func (s *Server) extractSequence(ctx context.Context) (map[string]interface{}, error) {
-	seq := map[string]interface{}{
-		"lifelines": []string{},
-		"messages":  []map[string]interface{}{},
+	seq, err := s.engine.GetSequenceDiagram(ctx)
+	if err != nil {
+		return nil, err
 	}
-	return seq, nil
+	
+	// Convert messages to map format for JSON
+	messages := make([]map[string]interface{}, len(seq.Messages))
+	for i, m := range seq.Messages {
+		messages[i] = map[string]interface{}{
+			"seq":   m.Seq,
+			"from":  m.From,
+			"to":    m.To,
+			"label": m.Label,
+		}
+	}
+	
+	return map[string]interface{}{
+		"lifelines": seq.Lifelines,
+		"messages":  messages,
+	}, nil
 }
 
 func (s *Server) extractPie(ctx context.Context) (map[string]interface{}, error) {
-	pie := map[string]interface{}{
-		"slices": []map[string]interface{}{},
+	slices, err := s.engine.GetPieChart(ctx)
+	if err != nil {
+		return nil, err
 	}
-	return pie, nil
+	
+	// Convert to map format for JSON
+	sliceData := make([]map[string]interface{}, len(slices))
+	for i, slice := range slices {
+		sliceData[i] = map[string]interface{}{
+			"label": slice.Label,
+			"value": slice.Value,
+		}
+	}
+	
+	return map[string]interface{}{
+		"slices": sliceData,
+	}, nil
 }
 
 func (s *Server) extractLine(ctx context.Context) (map[string]interface{}, error) {
-	line := map[string]interface{}{
-		"series": []map[string]interface{}{},
+	points, err := s.engine.GetLineChart(ctx)
+	if err != nil {
+		return nil, err
 	}
-	return line, nil
+	
+	// Group points by series
+	seriesMap := make(map[string][]map[string]float64)
+	for _, p := range points {
+		seriesMap[p.Series] = append(seriesMap[p.Series], map[string]float64{
+			"x": p.X,
+			"y": p.Y,
+		})
+	}
+	
+	// Convert to array format
+	var series []map[string]interface{}
+	for name, pts := range seriesMap {
+		series = append(series, map[string]interface{}{
+			"name":   name,
+			"points": pts,
+		})
+	}
+	
+	return map[string]interface{}{
+		"series": series,
+	}, nil
 }
 
 // handleChat handles LLM chat requests

@@ -21,12 +21,12 @@ func New() (*Engine, error) {
 	e := &Engine{
 		interpreter: prolog.New(nil, nil),
 	}
-	
+
 	// Load core predicates for CTL, CSP, and visualization
 	if err := e.loadCore(); err != nil {
 		return nil, fmt.Errorf("loading core predicates: %w", err)
 	}
-	
+
 	return e, nil
 }
 
@@ -238,7 +238,7 @@ length([_|T], N) :- length(T, N1), N is N1 + 1.
 func (e *Engine) LoadSpec(source string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	
+
 	e.specSource = source
 	return e.interpreter.Exec(source)
 }
@@ -247,7 +247,7 @@ func (e *Engine) LoadSpec(source string) error {
 func (e *Engine) LoadSpecFile(path string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	
+
 	if err := e.interpreter.Exec(fmt.Sprintf(`:- consult('%s').`, path)); err != nil {
 		return err
 	}
@@ -258,13 +258,13 @@ func (e *Engine) LoadSpecFile(path string) error {
 func (e *Engine) Query(ctx context.Context, query string) ([]map[string]string, error) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	
+
 	sols, err := e.interpreter.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
 	defer sols.Close()
-	
+
 	var results []map[string]string
 	for sols.Next() {
 		// For now, just record that we found a solution
@@ -273,7 +273,7 @@ func (e *Engine) Query(ctx context.Context, query string) ([]map[string]string, 
 		result["_solution"] = "true"
 		results = append(results, result)
 	}
-	
+
 	return results, sols.Err()
 }
 
@@ -281,13 +281,13 @@ func (e *Engine) Query(ctx context.Context, query string) ([]map[string]string, 
 func (e *Engine) QueryOne(ctx context.Context, query string) (bool, error) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	
+
 	sols, err := e.interpreter.QueryContext(ctx, query)
 	if err != nil {
 		return false, err
 	}
 	defer sols.Close()
-	
+
 	return sols.Next(), sols.Err()
 }
 
@@ -295,35 +295,188 @@ func (e *Engine) QueryOne(ctx context.Context, query string) (bool, error) {
 func (e *Engine) GetStateMachine(ctx context.Context) (*StateMachine, error) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	
+
 	sm := &StateMachine{
 		States:      []string{},
 		Transitions: []Transition{},
 		Initial:     []string{},
 		Accepting:   []string{},
 	}
-	
-	// Get states
-	sols, err := e.interpreter.QueryContext(ctx, "all_states(States).")
-	if err != nil {
-		return nil, err
+
+	// Get transitions and collect states from them
+	stateSet := make(map[string]bool)
+	sols, err := e.interpreter.QueryContext(ctx, "transition(From, Label, To).")
+	if err == nil {
+		for sols.Next() {
+			var result map[string]interface{}
+			if err := sols.Scan(&result); err == nil {
+				from := result["From"].(string)
+				label := result["Label"].(string)
+				to := result["To"].(string)
+				sm.Transitions = append(sm.Transitions, Transition{
+					From:  from,
+					Label: label,
+					To:    to,
+				})
+				stateSet[from] = true
+				stateSet[to] = true
+			}
+		}
+		sols.Close()
 	}
-	if sols.Next() {
-		// Extract states from solution
+
+	// Get initial states
+	sols, err = e.interpreter.QueryContext(ctx, "initial(S).")
+	if err == nil {
+		for sols.Next() {
+			var s string
+			if err := sols.Scan(&s); err == nil {
+				sm.Initial = append(sm.Initial, s)
+				stateSet[s] = true
+			}
+		}
+		sols.Close()
 	}
-	sols.Close()
-	
-	// Get transitions
-	sols, err = e.interpreter.QueryContext(ctx, "transition(From, Label, To).")
-	if err != nil {
-		return nil, err
+
+	// Get accepting states
+	sols, err = e.interpreter.QueryContext(ctx, "accepting(S).")
+	if err == nil {
+		for sols.Next() {
+			var s string
+			if err := sols.Scan(&s); err == nil {
+				sm.Accepting = append(sm.Accepting, s)
+				stateSet[s] = true
+			}
+		}
+		sols.Close()
 	}
-	for sols.Next() {
-		// Extract transitions
+
+	// Convert state set to slice
+	for s := range stateSet {
+		sm.States = append(sm.States, s)
 	}
-	sols.Close()
-	
+
 	return sm, nil
+}
+
+// SequenceDiagram represents extracted sequence diagram data
+type SequenceDiagram struct {
+	Lifelines []string          `json:"lifelines"`
+	Messages  []SequenceMessage `json:"messages"`
+}
+
+// SequenceMessage represents a message in a sequence diagram
+type SequenceMessage struct {
+	Seq   int    `json:"seq"`
+	From  string `json:"from"`
+	To    string `json:"to"`
+	Label string `json:"label"`
+}
+
+// GetSequenceDiagram extracts sequence diagram data
+func (e *Engine) GetSequenceDiagram(ctx context.Context) (*SequenceDiagram, error) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	seq := &SequenceDiagram{
+		Lifelines: []string{},
+		Messages:  []SequenceMessage{},
+	}
+
+	// Get lifelines
+	sols, err := e.interpreter.QueryContext(ctx, "lifeline(L).")
+	if err == nil {
+		for sols.Next() {
+			var l string
+			if err := sols.Scan(&l); err == nil {
+				seq.Lifelines = append(seq.Lifelines, l)
+			}
+		}
+		sols.Close()
+	}
+
+	// Get messages
+	sols, err = e.interpreter.QueryContext(ctx, "message(Seq, From, To, Label).")
+	if err == nil {
+		for sols.Next() {
+			var result map[string]interface{}
+			if err := sols.Scan(&result); err == nil {
+				seqNum := int(result["Seq"].(float64)) // Convert from float64 if necessary
+				from := result["From"].(string)
+				to := result["To"].(string)
+				label := result["Label"].(string)
+				seq.Messages = append(seq.Messages, SequenceMessage{
+					Seq:   seqNum,
+					From:  from,
+					To:    to,
+					Label: label,
+				})
+			}
+		}
+		sols.Close()
+	}
+
+	return seq, nil
+}
+
+// PieSlice represents a slice of a pie chart
+type PieSlice struct {
+	Label string  `json:"label"`
+	Value float64 `json:"value"`
+}
+
+// GetPieChart extracts pie chart data
+func (e *Engine) GetPieChart(ctx context.Context) ([]PieSlice, error) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	var slices []PieSlice
+
+	sols, err := e.interpreter.QueryContext(ctx, "pie_slice(Label, Value).")
+	if err == nil {
+		for sols.Next() {
+			var result map[string]interface{}
+			if err := sols.Scan(&result); err == nil {
+				label := result["Label"].(string)
+				value := result["Value"].(float64)
+				slices = append(slices, PieSlice{Label: label, Value: value})
+			}
+		}
+		sols.Close()
+	}
+
+	return slices, nil
+}
+
+// LinePoint represents a point on a line chart
+type LinePoint struct {
+	Series string  `json:"series"`
+	X      float64 `json:"x"`
+	Y      float64 `json:"y"`
+}
+
+// GetLineChart extracts line chart data
+func (e *Engine) GetLineChart(ctx context.Context) ([]LinePoint, error) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	var points []LinePoint
+
+	sols, err := e.interpreter.QueryContext(ctx, "line_point(Series, X, Y).")
+	if err == nil {
+		for sols.Next() {
+			var result map[string]interface{}
+			if err := sols.Scan(&result); err == nil {
+				series := result["Series"].(string)
+				x := result["X"].(float64)
+				y := result["Y"].(float64)
+				points = append(points, LinePoint{Series: series, X: x, Y: y})
+			}
+		}
+		sols.Close()
+	}
+
+	return points, nil
 }
 
 // StateMachine represents extracted state machine data
@@ -352,7 +505,7 @@ func (e *Engine) GetSource() string {
 func (e *Engine) Reset() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	
+
 	e.interpreter = prolog.New(nil, nil)
 	e.specSource = ""
 	return e.loadCore()
@@ -362,18 +515,18 @@ func (e *Engine) Reset() error {
 func (e *Engine) RawQuery(ctx context.Context, query string) (string, error) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	
+
 	sols, err := e.interpreter.QueryContext(ctx, query)
 	if err != nil {
 		return "", err
 	}
 	defer sols.Close()
-	
+
 	var results []string
 	for sols.Next() {
 		results = append(results, "true")
 	}
-	
+
 	if len(results) == 0 {
 		return "false", nil
 	}
