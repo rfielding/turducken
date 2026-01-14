@@ -287,11 +287,18 @@
             padding: 20px;
             border-radius: 6px;
             border: 1px solid var(--border-color);
-            overflow-x: auto;
+            overflow: auto;
             flex: 1;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            min-height: 500px;
+        }
+        
+        .mermaid-output .mermaid {
+            min-width: 800px;
+        }
+        
+        .mermaid-output svg {
+            min-width: 700px;
+            min-height: 400px;
         }
         
         .property-check {
@@ -750,7 +757,12 @@ transition(busy, done, idle).
                 
                 if (mermaidCode) {
                     output.innerHTML = `<pre class="mermaid">${mermaidCode}</pre>`;
-                    mermaid.run();
+                    try {
+                        await mermaid.run();
+                    } catch (mermaidErr) {
+                        console.error('Mermaid error:', mermaidErr, 'Code:', mermaidCode);
+                        output.innerHTML = `<div style="color: var(--accent-red);">Mermaid syntax error</div><pre style="color: var(--text-secondary); font-size: 0.8rem; white-space: pre-wrap;">${mermaidCode}</pre>`;
+                    }
                 } else {
                     output.innerHTML = '<div style="color: var(--text-secondary);">No data to visualize. Load a specification first.</div>';
                 }
@@ -826,14 +838,31 @@ transition(busy, done, idle).
         
         function generateLineMermaid(data) {
             if (!data || !data.series || data.series.length === 0) {
-                return `xychart-beta
-    title "Sample Data"
-    x-axis [1, 2, 3, 4, 5]
-    y-axis "Value" 0 --> 100
-    line [10, 40, 30, 80, 60]`;
+                return null;
             }
             
-            let code = 'xychart-beta\n    title "Data"\n';
+            // Get the first series
+            const series = data.series[0];
+            if (!series || !series.points || series.points.length === 0) {
+                return null;
+            }
+            
+            // Sort points by x value
+            const sortedPoints = [...series.points].sort((a, b) => a.x - b.x);
+            
+            // Extract x values as quoted strings and y values
+            const xValues = sortedPoints.map(p => `"${p.x}"`).join(', ');
+            const yValues = sortedPoints.map(p => p.y).join(', ');
+            const maxY = Math.max(...sortedPoints.map(p => p.y)) + 5;
+            
+            // Use proper xychart-beta syntax
+            const title = series.name || 'Data';
+            let code = `xychart-beta
+    title "${title}"
+    x-axis [${xValues}]
+    y-axis "Value" 0 --> ${maxY}
+    line [${yValues}]`;
+            
             return code;
         }
         
