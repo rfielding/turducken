@@ -120,6 +120,7 @@ func (s *Server) ListenAndServe(addr string) error {
 	mux.HandleFunc("/api/docs", s.handleDocs)
 	mux.HandleFunc("/api/actors", s.handleActors)
 	mux.HandleFunc("/api/metrics", s.handleMetrics)
+	mux.HandleFunc("/api/openapi", s.handleOpenAPI)
 
 	// Static files (embedded)
 	mux.HandleFunc("/", s.handleStatic)
@@ -643,6 +644,139 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		"counters":   s.getCounters(),
 		"timeSeries": s.getTimeSeries(),
 	})
+}
+
+// handleOpenAPI returns OpenAPI 3.0 spec generated from Prolog API definitions
+func (s *Server) handleOpenAPI(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	// Query API info from spec
+	info := make(map[string]string)
+	infoResults, _ := s.engine.Query(ctx, "api_info(Key, Value).")
+	for _, row := range infoResults {
+		key := row["Key"]
+		val := row["Value"]
+		if key != "" && val != "" {
+			info[key] = val
+		}
+	}
+
+	// Query endpoints
+	type Endpoint struct {
+		Method      string
+		Path        string
+		Description string
+		OperationID string
+	}
+	var endpoints []Endpoint
+	epResults, _ := s.engine.Query(ctx, "api_endpoint(Method, Path, Desc, OpID).")
+	for _, row := range epResults {
+		endpoints = append(endpoints, Endpoint{
+			Method:      row["Method"],
+			Path:        row["Path"],
+			Description: row["Desc"],
+			OperationID: row["OpID"],
+		})
+	}
+
+	// Query request fields
+	type Field struct {
+		Name        string
+		Type        string
+		Required    bool
+		Description string
+	}
+	requestFields := make(map[string][]Field)
+	reqResults, _ := s.engine.Query(ctx, "api_request(OpID, Name, Type, Req, Desc).")
+	for _, row := range reqResults {
+		opID := row["OpID"]
+		reqBool := row["Req"] == "true"
+		requestFields[opID] = append(requestFields[opID], Field{
+			Name:        row["Name"],
+			Type:        row["Type"],
+			Required:    reqBool,
+			Description: row["Desc"],
+		})
+	}
+
+	// Query response fields
+	responseFields := make(map[string][]Field)
+	respResults, _ := s.engine.Query(ctx, "api_response(OpID, Name, Type, Desc).")
+	for _, row := range respResults {
+		opID := row["OpID"]
+		responseFields[opID] = append(responseFields[opID], Field{
+			Name:        row["Name"],
+			Type:        row["Type"],
+			Description: row["Desc"],
+		})
+	}
+
+	// Build OpenAPI spec
+	paths := make(map[string]interface{})
+	for _, ep := range endpoints {
+		method := strings.ToLower(ep.Method)
+		pathObj := make(map[string]interface{})
+
+		opObj := map[string]interface{}{
+			"operationId": ep.OperationID,
+			"summary":     ep.Description,
+			"responses": map[string]interface{}{
+				"200": map[string]interface{}{
+					"description": "Success",
+				},
+			},
+		}
+
+		// Add request body for POST
+		if method == "post" {
+			if fields, ok := requestFields[ep.OperationID]; ok && len(fields) > 0 {
+				props := make(map[string]interface{})
+				var required []string
+				for _, f := range fields {
+					props[f.Name] = map[string]interface{}{
+						"type":        f.Type,
+						"description": f.Description,
+					}
+					if f.Required {
+						required = append(required, f.Name)
+					}
+				}
+				opObj["requestBody"] = map[string]interface{}{
+					"required": true,
+					"content": map[string]interface{}{
+						"application/json": map[string]interface{}{
+							"schema": map[string]interface{}{
+								"type":       "object",
+								"properties": props,
+								"required":   required,
+							},
+						},
+					},
+				}
+			}
+		}
+
+		pathObj[method] = opObj
+		paths[ep.Path] = pathObj
+	}
+
+	openapi := map[string]interface{}{
+		"openapi": "3.0.0",
+		"info": map[string]interface{}{
+			"title":       info["title"],
+			"version":     info["version"],
+			"description": info["description"],
+		},
+		"servers": []map[string]string{
+			{"url": "/api"},
+		},
+		"paths": paths,
+	}
+
+	json.NewEncoder(w).Encode(openapi)
 }
 
 // handleStatic serves static files

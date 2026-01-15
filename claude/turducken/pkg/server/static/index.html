@@ -785,7 +785,21 @@ transition(busy, done, idle).
                                 name,
                                 points
                             }));
-                            mermaidCode = generateLineMermaid({ series });
+                            const lineData = { series };
+                            mermaidCode = generateLineMermaid(lineData);
+                            
+                            // Render with legend
+                            if (mermaidCode) {
+                                const legendHtml = generateLineLegend(lineData);
+                                output.innerHTML = `<pre class="mermaid">${mermaidCode}</pre>${legendHtml}`;
+                                try {
+                                    await mermaid.run();
+                                } catch (mermaidErr) {
+                                    console.error('Mermaid error:', mermaidErr);
+                                    output.innerHTML = `<div style="color: var(--accent-red);">Mermaid syntax error</div><pre style="color: var(--text-secondary); font-size: 0.8rem;">${mermaidCode}</pre>`;
+                                }
+                                return;
+                            }
                         }
                         break;
                 }
@@ -1023,11 +1037,8 @@ transition(busy, done, idle).
                             });
                             maxY += 5;
                             
-                            // Build title with series names as legend
-                            const seriesNames = data.series.map(s => s.name).join(', ');
-                            
                             let code = `xychart-beta
-    title "Metrics: ${seriesNames}"
+    title "Metrics Over Time"
     x-axis [${xValues}]
     y-axis "Value" 0 --> ${maxY}`;
                             
@@ -1041,6 +1052,26 @@ transition(busy, done, idle).
                             });
                             
                             return code;
+                        }
+                        
+                        // Generate legend HTML for line chart
+                        function generateLineLegend(data) {
+                            if (!data || !data.series || data.series.length === 0) {
+                                return '';
+                            }
+                            
+                            const colors = ['#58a6ff', '#3fb950', '#f85149', '#d29922', '#a371f7', '#f778ba'];
+                            
+                            let html = '<div style="display: flex; flex-wrap: wrap; gap: 16px; margin-top: 12px; padding: 8px; background: var(--bg-tertiary); border-radius: 4px;">';
+                            data.series.forEach((series, i) => {
+                                const color = colors[i % colors.length];
+                                html += `<div style="display: flex; align-items: center; gap: 6px;">
+                                    <div style="width: 20px; height: 3px; background: ${color};"></div>
+                                    <span style="color: var(--text-secondary); font-size: 0.85rem;">${series.name}</span>
+                                </div>`;
+                            });
+                            html += '</div>';
+                            return html;
                         }
                         
                         // Example specifications
@@ -1098,7 +1129,7 @@ transition(busy, done, idle).
                 
                 transition(idle, request, requesting).
                 transition(requesting, query, querying).
-                transition(querying, result, responding).
+                transition(querying, result, responding);
                 transition(responding, response, idle).
                 
                 prop(idle, ready).
@@ -1146,6 +1177,7 @@ transition(busy, done, idle).
                                                         <strong style="color: var(--accent-blue);">${p.name}</strong>
                                                     </div>
                                                     <div style="font-size: 0.85rem; color: var(--text-secondary); margin-left: 28px;">${p.description}</div>
+                                                    <div style="font-size: 0.8rem; color: var(--accent-purple); margin-left: 28px; font-family: monospace;">${p.formula}</div>
                                                     ${p.error ? `<div style="font-size: 0.8rem; color: var(--accent-red); margin-left: 28px;">Error: ${p.error}</div>` : ''}
                                                 </div>
                                                 <button class="btn btn-secondary" onclick="checkNamedProperty('${p.name}', '${p.formula.replace(/'/g, "\\'")}')">Recheck</button>
