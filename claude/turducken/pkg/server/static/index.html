@@ -477,7 +477,7 @@ transition(busy, done, idle).
                 <!-- Check Tab -->
                 <div id="tab-check" class="tab-content">
                     <div class="panel-body">
-                        <h4 style="margin: 0 0 12px 0; color: var(--text-primary);">Defined Properties</h4>
+                        <h4 style="margin: 0 0 12px 0; color: var(--text-primary);">Properties</h4>
                         <div id="propertyList" style="margin-bottom: 16px;">
                             <div style="color: var(--text-secondary);">Load a spec to see defined properties</div>
                         </div>
@@ -772,18 +772,34 @@ transition(busy, done, idle).
                         const tsResp = await fetch('/api/metrics');
                         const tsData = await tsResp.json();
                         if (tsData.timeSeries && tsData.timeSeries.length > 0) {
-                            // Group by counter name
+                            // Data already has cumulative values per counter
+                            // Group by counter, using relative time as x-axis
+                            const firstTime = new Date(tsData.timeSeries[0].time).getTime();
                             const seriesMap = new Map();
-                            tsData.timeSeries.forEach((pt, idx) => {
+                            
+                            tsData.timeSeries.forEach(pt => {
                                 if (!seriesMap.has(pt.counter)) {
                                     seriesMap.set(pt.counter, []);
                                 }
-                                seriesMap.get(pt.counter).push({ x: idx, y: pt.value });
+                                // x = seconds since first point, y = cumulative value
+                                const x = (new Date(pt.time).getTime() - firstTime) / 1000;
+                                seriesMap.get(pt.counter).push({ x, y: pt.value });
                             });
+                            
+                            // Sample each series to max 20 points for readability
+                            const samplePoints = (points, maxPoints) => {
+                                if (points.length <= maxPoints) return points;
+                                const step = (points.length - 1) / (maxPoints - 1);
+                                const sampled = [];
+                                for (let i = 0; i < maxPoints; i++) {
+                                    sampled.push(points[Math.round(i * step)]);
+                                }
+                                return sampled;
+                            };
                             
                             const series = Array.from(seriesMap.entries()).map(([name, points]) => ({
                                 name,
-                                points
+                                points: samplePoints(points, 20)
                             }));
                             const lineData = { series };
                             mermaidCode = generateLineMermaid(lineData);
@@ -823,24 +839,42 @@ transition(busy, done, idle).
                         function groupTransitionsByActor(sm) {
                             const actors = {};
                             
-                            // Group by state prefix (ui_, server_, engine_, llm_)
-                            const prefixes = {
-                                'ui_': 'ui',
-                                'server_': 'http_server', 
-                                'engine_': 'prolog_engine',
-                                'llm_': 'llm_client'
+                            // Dynamically extract prefixes from state names
+                            // Convention: states are named like "actorname_statename"
+                            const extractPrefix = (state) => {
+                                const idx = state.indexOf('_');
+                                if (idx > 0) {
+                                    return state.substring(0, idx + 1); // include underscore
+                                }
+                                return null;
                             };
                             
+                            // Build prefix map from all states we see
+                            const prefixToActor = new Map();
+                            
                             sm.transitions.forEach(t => {
-                                let actor = null;
-                                for (const [prefix, name] of Object.entries(prefixes)) {
-                                    if (t.from.startsWith(prefix) || t.to.startsWith(prefix)) {
-                                        actor = name;
-                                        break;
+                                [t.from, t.to].forEach(state => {
+                                    const prefix = extractPrefix(state);
+                                    if (prefix && !prefixToActor.has(prefix)) {
+                                        // Actor name is prefix without underscore
+                                        prefixToActor.set(prefix, prefix.slice(0, -1));
                                     }
+                                });
+                            });
+                            
+                            sm.initial.forEach(s => {
+                                const prefix = extractPrefix(s);
+                                if (prefix && !prefixToActor.has(prefix)) {
+                                    prefixToActor.set(prefix, prefix.slice(0, -1));
                                 }
+                            });
+                            
+                            // Group transitions by actor
+                            sm.transitions.forEach(t => {
+                                const prefix = extractPrefix(t.from) || extractPrefix(t.to);
+                                if (!prefix) return;
                                 
-                                // Skip unknown transitions
+                                const actor = prefixToActor.get(prefix);
                                 if (!actor) return;
                                 
                                 if (!actors[actor]) {
@@ -851,54 +885,24 @@ transition(busy, done, idle).
                             
                             // Add initial states
                             sm.initial.forEach(s => {
-                                for (const [prefix, name] of Object.entries(prefixes)) {
-                                    if (s.startsWith(prefix)) {
-                                        if (!actors[name]) {
-                                            actors[name] = { transitions: [], initial: [] };
-                                        }
-                                        actors[name].initial.push(s);
-                                        break;
-                                    }
+                                const prefix = extractPrefix(s);
+                                if (!prefix) return;
+                                
+                                const actor = prefixToActor.get(prefix);
+                                if (!actor) return;
+                                
+                                if (!actors[actor]) {
+                                    actors[actor] = { transitions: [], initial: [] };
                                 }
+                                actors[actor].initial.push(s);
                             });
                             
                             return actors;
                         }
                         
                         function generateActorPanes(actorMachines) {
-                            // Message annotations: which transitions involve sending/receiving
-                            const msgAnnotations = {
-                                // UI sends
-                                'submit_chat': '→ http_server',
-                                'apply_spec': '→ http_server',
-                                'run_query': '→ http_server',
-                                // UI receives
-                                'chat_response': '← http_server',
-                                'chat_error': '← http_server',
-                                'spec_loaded': '← http_server',
-                                'spec_error': '← http_server',
-                                'query_result': '← http_server',
-                                // http_server sends/receives
-                                'receive_request': '← ui',
-                                'send_response': '→ ui',
-                                // prolog_engine receives
-                                'load_spec': '← http_server',
-                                'load_spec_error': '← http_server',
-                                'query': '← http_server',
-                                'reset': '← http_server',
-                                'reload_spec': '← http_server',
-                                // llm_client
-                                'send_prompt': '← http_server',
-                                'receive_response': '← api',
-                                'timeout': '← api',
-                                'api_error': '← api',
-                                'extract_prolog': '→ http_server',
-                                'no_prolog': '→ http_server',
-                                'retry': '(internal)'
-                            };
-                            
-                            // Fixed order for actors
-                            const actorOrder = ['ui', 'http_server', 'prolog_engine', 'llm_client'];
+                            // Get actors in sorted order (no hardcoded list)
+                            const actorOrder = Object.keys(actorMachines).sort();
                             
                             let html = `<div style="
                 display: flex; 
@@ -921,9 +925,8 @@ transition(busy, done, idle).
                 });
                 
                 sm.transitions.forEach(t => {
-                    const annotation = msgAnnotations[t.label] || '';
-                    const labelWithMsg = annotation ? `${t.label} ${annotation}` : t.label;
-                    code += `    ${t.from} --> ${t.to}: ${labelWithMsg}\n`;
+                    // No hardcoded annotations - just show the label
+                    code += `    ${t.from} --> ${t.to}: ${t.label}\n`;
                 });
                 
                 html += `
@@ -1170,22 +1173,17 @@ transition(busy, done, idle).
                                         
                                         return `
                                         <div style="margin-bottom: 8px; padding: 8px; background: var(--bg-tertiary); border-radius: 4px;">
-                                            <div style="display: flex; justify-content: space-between; align-items: center;">
-                                                <div style="flex: 1;">
-                                                    <div style="display: flex; align-items: center; gap: 8px;">
-                                                        <span style="color: ${statusColor}; font-size: 1.2rem;">${statusIcon}</span>
-                                                        <strong style="color: var(--accent-blue);">${p.name}</strong>
-                                                    </div>
-                                                    <div style="font-size: 0.85rem; color: var(--text-secondary); margin-left: 28px;">${p.description}</div>
-                                                    <div style="font-size: 0.8rem; color: var(--accent-purple); margin-left: 28px; font-family: monospace;">${p.formula}</div>
-                                                    ${p.error ? `<div style="font-size: 0.8rem; color: var(--accent-red); margin-left: 28px;">Error: ${p.error}</div>` : ''}
-                                                </div>
-                                                <button class="btn btn-secondary" onclick="checkNamedProperty('${p.name}', '${p.formula.replace(/'/g, "\\'")}')">Recheck</button>
+                                            <div style="display: flex; align-items: center; gap: 8px;">
+                                                <span style="color: ${statusColor}; font-size: 1.2rem;">${statusIcon}</span>
+                                                <strong style="color: var(--accent-blue);">${p.name}</strong>
                                             </div>
+                                            <div style="font-size: 0.85rem; color: var(--text-secondary); margin-left: 28px;">${p.description}</div>
+                                            <div style="font-size: 0.8rem; color: var(--accent-purple); margin-left: 28px; font-family: monospace;">${p.formula}</div>
+                                            ${p.error ? `<div style="font-size: 0.8rem; color: var(--accent-red); margin-left: 28px;">Error: ${p.error}</div>` : ''}
                                         </div>
                                     `}).join('');
                                 } else {
-                                    listDiv.innerHTML = '<div style="color: var(--text-secondary);">No named properties defined in spec</div>';
+                                    listDiv.innerHTML = '<div style="color: var(--text-secondary);">No properties defined in spec</div>';
                                 }
                             } catch (err) {
                                 console.error('Error loading properties:', err);
