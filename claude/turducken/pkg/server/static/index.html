@@ -818,13 +818,16 @@ transition(busy, done, idle).
                             };
                             
                             sm.transitions.forEach(t => {
-                                let actor = 'unknown';
+                                let actor = null;
                                 for (const [prefix, name] of Object.entries(prefixes)) {
                                     if (t.from.startsWith(prefix) || t.to.startsWith(prefix)) {
                                         actor = name;
                                         break;
                                     }
                                 }
+                                
+                                // Skip unknown transitions
+                                if (!actor) return;
                                 
                                 if (!actors[actor]) {
                                     actors[actor] = { transitions: [], initial: [] };
@@ -836,9 +839,10 @@ transition(busy, done, idle).
                             sm.initial.forEach(s => {
                                 for (const [prefix, name] of Object.entries(prefixes)) {
                                     if (s.startsWith(prefix)) {
-                                        if (actors[name]) {
-                                            actors[name].initial.push(s);
+                                        if (!actors[name]) {
+                                            actors[name] = { transitions: [], initial: [] };
                                         }
+                                        actors[name].initial.push(s);
                                         break;
                                     }
                                 }
@@ -848,16 +852,53 @@ transition(busy, done, idle).
                         }
                         
                         function generateActorPanes(actorMachines) {
+                            // Message annotations: which transitions involve sending/receiving
+                            const msgAnnotations = {
+                                // UI sends
+                                'submit_chat': '→ http_server',
+                                'apply_spec': '→ http_server',
+                                'run_query': '→ http_server',
+                                // UI receives
+                                'chat_response': '← http_server',
+                                'chat_error': '← http_server',
+                                'spec_loaded': '← http_server',
+                                'spec_error': '← http_server',
+                                'query_result': '← http_server',
+                                // http_server sends/receives
+                                'receive_request': '← ui',
+                                'send_response': '→ ui',
+                                // prolog_engine receives
+                                'load_spec': '← http_server',
+                                'load_spec_error': '← http_server',
+                                'query': '← http_server',
+                                'reset': '← http_server',
+                                'reload_spec': '← http_server',
+                                // llm_client
+                                'send_prompt': '← http_server',
+                                'receive_response': '← api',
+                                'timeout': '← api',
+                                'api_error': '← api',
+                                'extract_prolog': '→ http_server',
+                                'no_prolog': '→ http_server',
+                                'retry': '(internal)'
+                            };
+                            
+                            // Fixed order for actors
+                            const actorOrder = ['ui', 'http_server', 'prolog_engine', 'llm_client'];
+                            
                             let html = `<div style="
-                display: grid; 
-                grid-template-columns: 1fr 1fr; 
+                display: flex; 
+                flex-direction: column;
                 gap: 16px; 
                 overflow: auto;
                 max-height: 100%;
                 padding: 4px;
             ">`;
             
-            for (const [actor, sm] of Object.entries(actorMachines)) {
+            for (const actor of actorOrder) {
+                const sm = actorMachines[actor];
+                if (!sm) continue;
+                
                 let code = 'stateDiagram-v2\n';
                 code += `    direction LR\n`;
                 
@@ -866,7 +907,9 @@ transition(busy, done, idle).
                 });
                 
                 sm.transitions.forEach(t => {
-                    code += `    ${t.from} --> ${t.to}: ${t.label}\n`;
+                    const annotation = msgAnnotations[t.label] || '';
+                    const labelWithMsg = annotation ? `${t.label} ${annotation}` : t.label;
+                    code += `    ${t.from} --> ${t.to}: ${labelWithMsg}\n`;
                 });
                 
                 html += `
@@ -874,11 +917,11 @@ transition(busy, done, idle).
                         background: var(--bg-tertiary); 
                         padding: 12px; 
                         border-radius: 6px;
-                        min-height: 200px;
-                        overflow: auto;
+                        min-height: 120px;
+                        overflow-x: auto;
                     ">
-                        <h4 style="margin: 0 0 8px 0; color: var(--accent-blue); position: sticky; top: 0; background: var(--bg-tertiary); padding: 4px 0;">${actor}</h4>
-                        <div style="overflow: auto;">
+                        <h4 style="margin: 0 0 8px 0; color: var(--accent-blue);">${actor}</h4>
+                        <div style="overflow-x: auto; min-width: max-content;">
                             <pre class="mermaid" style="margin: 0;">${code}</pre>
                         </div>
                     </div>
