@@ -367,6 +367,28 @@
             font-size: 0.85rem;
             margin-top: 8px;
         }
+
+        .terminal-output {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 12px;
+            min-height: 200px;
+            max-height: 280px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 0.85rem;
+            color: var(--text-primary);
+        }
+
+        .terminal-line {
+            margin-bottom: 6px;
+            white-space: pre-wrap;
+        }
+
+        .terminal-prompt {
+            color: var(--accent-blue);
+        }
         
         .examples {
             margin-top: 12px;
@@ -415,7 +437,7 @@
                     <button class="tab" onclick="switchTab('docs')">📖 Docs</button>
                     <button class="tab" onclick="switchTab('spec')">📝 Prolog</button>
                     <button class="tab" onclick="switchTab('prompt')">🧭 Sys Prompt</button>
-                    <button class="tab" onclick="switchTab('query')">🔍 Query</button>
+                    <button class="tab" onclick="switchTab('query')">🖥 Terminal</button>
                     <button class="tab" onclick="switchTab('check')">✓ Check</button>
                 </div>
                 
@@ -510,13 +532,12 @@ transition(busy, done, idle).
                     <div class="panel-body">
                         <input type="text" id="queryInput" placeholder="Enter Prolog query (e.g., transition(X, Y, Z).)">
                         <div class="btn-group">
-                            <button class="btn btn-primary" onclick="runQuery()">Run Query</button>
+                            <button class="btn btn-primary" onclick="runQuery()">Run</button>
                         </div>
                         <div class="help-text">
                             Try: <code>transition(X, _, Y).</code> or <code>initial(X).</code>
                         </div>
-                        <h4 style="margin: 16px 0 8px 0; color: var(--text-secondary);">Result:</h4>
-                        <div id="queryOutput" class="output"></div>
+                        <div id="queryOutput" class="terminal-output"></div>
                     </div>
                 </div>
                 
@@ -659,9 +680,12 @@ transition(busy, done, idle).
             const output = document.getElementById('queryOutput');
             
             if (!query) {
-                output.textContent = 'Enter a query';
+                appendTerminalLine(output, 'Enter a query', 'var(--accent-yellow)');
                 return;
             }
+
+            removeTrailingPrompt(output);
+            appendTerminalLine(output, `| ?- ${query}`, 'var(--accent-blue)');
             
             try {
                 const resp = await fetch('/api/query', {
@@ -670,12 +694,62 @@ transition(busy, done, idle).
                     body: JSON.stringify({ query })
                 });
                 const data = await resp.json();
-                
-                output.className = 'output ' + (data.success ? 'success' : 'error');
-                output.textContent = data.success ? data.result : 'Error: ' + data.error;
+
+                if (data.success) {
+                    appendTerminalLine(output, data.result, 'var(--text-primary)');
+                } else {
+                    appendTerminalLine(output, `Error: ${data.error}`, 'var(--accent-red)');
+                }
             } catch (err) {
-                output.className = 'output error';
-                output.textContent = 'Failed: ' + err.message;
+                appendTerminalLine(output, `Failed: ${err.message}`, 'var(--accent-red)');
+            }
+
+            appendPromptLine(output);
+        }
+
+        function appendTerminalLine(output, text, color) {
+            if (!output) {
+                return;
+            }
+            const line = document.createElement('div');
+            line.className = 'terminal-line';
+            if (color) {
+                line.style.color = color;
+            }
+            line.textContent = text;
+            output.appendChild(line);
+            output.scrollTop = output.scrollHeight;
+        }
+
+        function scrollTerminalToBottom() {
+            const output = document.getElementById('queryOutput');
+            if (output) {
+                output.scrollTop = output.scrollHeight;
+            }
+        }
+
+        function appendPromptLine(output) {
+            if (!output) {
+                return;
+            }
+            const line = document.createElement('div');
+            line.className = 'terminal-line';
+            line.dataset.prompt = 'true';
+            const prompt = document.createElement('span');
+            prompt.className = 'terminal-prompt';
+            prompt.textContent = '| ?-';
+            line.appendChild(prompt);
+            output.appendChild(line);
+            output.scrollTop = output.scrollHeight;
+        }
+
+        function removeTrailingPrompt(output) {
+            if (!output) {
+                return;
+            }
+            const last = output.lastElementChild;
+            if (last && last.dataset && last.dataset.prompt === 'true') {
+                last.remove();
             }
         }
         
@@ -2107,14 +2181,20 @@ transition(busy, done, idle).
         
         window.addEventListener('load', () => {
             renderStates();
+            appendPromptLine(document.getElementById('queryOutput'));
         });
         
         // Keyboard shortcuts
         document.getElementById('queryInput').addEventListener('keydown', (e) => {
+            scrollTerminalToBottom();
             if (e.key === 'Enter') {
                 e.preventDefault();
                 runQuery();
             }
+        });
+
+        document.getElementById('queryInput').addEventListener('input', () => {
+            scrollTerminalToBottom();
         });
         
         document.getElementById('propertyInput').addEventListener('keydown', (e) => {
