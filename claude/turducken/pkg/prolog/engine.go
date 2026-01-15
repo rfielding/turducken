@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"sync"
 
@@ -613,6 +614,142 @@ func (e *Engine) GetSequenceDiagram(ctx context.Context) (*SequenceDiagram, erro
 					}
 				}
 				sols.Close()
+			}
+		}
+	}
+
+	if len(seq.Messages) == 0 {
+		type chanMsg struct {
+			Channel string
+			Msg     string
+		}
+		type endpoint struct {
+			Actor string
+		}
+
+		actors := make(map[string]bool)
+		for _, query := range []string{"actor(Name).", "actor(Name, _)."} {
+			sols, err = e.interpreter.QueryContext(ctx, query)
+			if err != nil {
+				continue
+			}
+			for sols.Next() {
+				var result struct {
+					Name interface{}
+				}
+				if err := sols.Scan(&result); err == nil {
+					name := termToString(result.Name)
+					if name != "" {
+						actors[name] = true
+					}
+				}
+			}
+			sols.Close()
+		}
+
+		extractActor := func(state string) string {
+			if state == "" {
+				return "system"
+			}
+			if actors[state] {
+				return state
+			}
+			if idx := strings.Index(state, "_"); idx > 0 {
+				prefix := state[:idx]
+				if len(actors) == 0 || actors[prefix] {
+					return prefix
+				}
+			}
+			if strings.Index(state, "_") == -1 {
+				return "system"
+			}
+			return state
+		}
+
+		senders := make(map[chanMsg]endpoint)
+		sols, err = e.interpreter.QueryContext(ctx, "send(Channel, Msg, From, _To).")
+		if err == nil {
+			for sols.Next() {
+				var result struct {
+					Channel interface{}
+					Msg     interface{}
+					From    interface{}
+				}
+				if err := sols.Scan(&result); err == nil {
+					key := chanMsg{
+						Channel: termToString(result.Channel),
+						Msg:     termToString(result.Msg),
+					}
+					senders[key] = endpoint{
+						Actor: extractActor(termToString(result.From)),
+					}
+				}
+			}
+			sols.Close()
+		}
+
+		receivers := make(map[chanMsg]endpoint)
+		sols, err = e.interpreter.QueryContext(ctx, "recv(Channel, Msg, From, _To).")
+		if err == nil {
+			for sols.Next() {
+				var result struct {
+					Channel interface{}
+					Msg     interface{}
+					From    interface{}
+				}
+				if err := sols.Scan(&result); err == nil {
+					key := chanMsg{
+						Channel: termToString(result.Channel),
+						Msg:     termToString(result.Msg),
+					}
+					receivers[key] = endpoint{
+						Actor: extractActor(termToString(result.From)),
+					}
+				}
+			}
+			sols.Close()
+		}
+
+		if len(senders) > 0 {
+			lifelinesSeen := make(map[string]bool)
+			var keys []chanMsg
+			for key := range senders {
+				keys = append(keys, key)
+			}
+			sort.Slice(keys, func(i, j int) bool {
+				if keys[i].Channel == keys[j].Channel {
+					return keys[i].Msg < keys[j].Msg
+				}
+				return keys[i].Channel < keys[j].Channel
+			})
+
+			seqNum := 1
+			for _, key := range keys {
+				sender := senders[key].Actor
+				receiver := "unknown"
+				if recv, ok := receivers[key]; ok && recv.Actor != "" {
+					receiver = recv.Actor
+				}
+				label := key.Msg
+				if key.Channel != "" {
+					label = fmt.Sprintf("%s@%s", key.Msg, key.Channel)
+				}
+				seq.Messages = append(seq.Messages, SequenceMessage{
+					Seq:   seqNum,
+					From:  sender,
+					To:    receiver,
+					Label: label,
+				})
+				seqNum++
+
+				if sender != "" && !lifelinesSeen[sender] {
+					seq.Lifelines = append(seq.Lifelines, sender)
+					lifelinesSeen[sender] = true
+				}
+				if receiver != "" && !lifelinesSeen[receiver] {
+					seq.Lifelines = append(seq.Lifelines, receiver)
+					lifelinesSeen[receiver] = true
+				}
 			}
 		}
 	}

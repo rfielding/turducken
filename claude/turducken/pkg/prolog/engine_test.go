@@ -243,6 +243,31 @@ func TestSequenceDiagramFromAnnotations(t *testing.T) {
 	}
 }
 
+func TestSequenceDiagramFromChannels(t *testing.T) {
+	e, _ := New()
+	ctx := context.Background()
+
+	e.LoadSpec(`
+        send(order_chan, bread, producer_idle, producer_busy).
+        recv(order_chan, bread, consumer_idle, consumer_busy).
+    `)
+
+	seq, err := e.GetSequenceDiagram(ctx)
+	if err != nil {
+		t.Fatalf("GetSequenceDiagram error: %v", err)
+	}
+
+	if len(seq.Messages) != 1 {
+		t.Errorf("expected 1 message, got %d", len(seq.Messages))
+	}
+	if len(seq.Lifelines) != 2 {
+		t.Errorf("expected 2 lifelines, got %d", len(seq.Lifelines))
+	}
+	if len(seq.Messages) == 1 && seq.Messages[0].Label != "bread@order_chan" {
+		t.Errorf("expected label bread@order_chan, got %s", seq.Messages[0].Label)
+	}
+}
+
 func TestPieChart(t *testing.T) {
 	e, _ := New()
 	ctx := context.Background()
