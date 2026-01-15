@@ -111,16 +111,3 @@ message(9, proposer1, acceptor3, accept_n_v).
 message(10, acceptor1, proposer1, accepted_n_v).
 message(11, acceptor2, proposer1, accepted_n_v).
 message(12, acceptor3, proposer1, accepted_n_v).
-
-% --- Visualization Data ---
-{
-  "timeline": [
-    { "step": 0, "label": "...", "from": "...", "to": "..." },
-    ...
-  ],
-  "byType": { ... },
-  "bySrc": { ... },
-  "byDst": { ... },
-  "total": ...,
-  "steps": ...
-}
