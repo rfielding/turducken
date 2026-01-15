@@ -923,6 +923,8 @@ func (s *Server) runAndCacheSimulation(steps int) {
 		})
 	}
 
+	result.Steps = steps
+
 	s.cachedSimulation = &result
 }
 
