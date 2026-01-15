@@ -82,6 +82,14 @@ actor_transition(acceptor, acceptor_promised, higher_promise, acceptor_promised)
 actor_transition(acceptor, acceptor_accepted, higher_promise, acceptor_accepted).
 actor_transition(acceptor, acceptor_accepted, accept_same_ballot, acceptor_accepted).
 
+% === MESSAGE ANNOTATIONS ===
+% Map state machine events to message directions for sequence extraction
+msg_annotation(prepare, send, acceptor).
+msg_annotation(promise, send, proposer).
+msg_annotation(send_accept, send, acceptor).
+msg_annotation(accept_value, send, proposer).
+msg_annotation(accept_same_ballot, send, proposer).
+
 % === DERIVED PREDICATES ===
 prop(State, Prop) :- actor_state(_, State, Props), member(Prop, Props).
 initial(S) :- actor_initial(_, S).
@@ -92,4 +100,3 @@ property(agreement, 'Once consensus is reached it persists', 'ag(or(not(atom(con
 property(progress, 'Can always eventually reach consensus', 'ag(ef(atom(consensus_reached)))').
 property(acceptor_safety, 'Acceptor must promise before accepting', 'ag(or(not(atom(has_accepted)), atom(has_promise)))').
 property(preemption_recovery, 'Preempted proposer can retry', 'ag(or(not(atom(higher_ballot_seen)), ef(atom(can_propose))))').
-

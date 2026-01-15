@@ -529,6 +529,84 @@ func (e *Engine) GetSequenceDiagram(ctx context.Context) (*SequenceDiagram, erro
 		sols.Close()
 	}
 
+	if len(seq.Messages) == 0 {
+		type annotation struct {
+			Direction string
+			Other     string
+		}
+
+		annotations := make(map[string][]annotation)
+		sols, err = e.interpreter.QueryContext(ctx, "msg_annotation(Label, Direction, Actor).")
+		if err == nil {
+			for sols.Next() {
+				var result struct {
+					Label     interface{}
+					Direction interface{}
+					Actor     interface{}
+				}
+				if err := sols.Scan(&result); err == nil {
+					label := termToString(result.Label)
+					annotations[label] = append(annotations[label], annotation{
+						Direction: termToString(result.Direction),
+						Other:     termToString(result.Actor),
+					})
+				}
+			}
+			sols.Close()
+		}
+
+		if len(annotations) > 0 {
+			lifelinesSeen := make(map[string]bool)
+			sols, err = e.interpreter.QueryContext(ctx, "actor_transition(Actor, From, Label, To).")
+			if err == nil {
+				seqNum := 1
+				for sols.Next() {
+					var result struct {
+						Actor interface{}
+						From  interface{}
+						Label interface{}
+						To    interface{}
+					}
+					if err := sols.Scan(&result); err == nil {
+						actor := termToString(result.Actor)
+						label := termToString(result.Label)
+						for _, ann := range annotations[label] {
+							var from string
+							var to string
+							switch ann.Direction {
+							case "send":
+								from = actor
+								to = ann.Other
+							case "recv":
+								from = ann.Other
+								to = actor
+							default:
+								continue
+							}
+							seq.Messages = append(seq.Messages, SequenceMessage{
+								Seq:   seqNum,
+								From:  from,
+								To:    to,
+								Label: label,
+							})
+							seqNum++
+
+							if !lifelinesSeen[from] {
+								seq.Lifelines = append(seq.Lifelines, from)
+								lifelinesSeen[from] = true
+							}
+							if !lifelinesSeen[to] {
+								seq.Lifelines = append(seq.Lifelines, to)
+								lifelinesSeen[to] = true
+							}
+						}
+					}
+				}
+				sols.Close()
+			}
+		}
+	}
+
 	return seq, nil
 }
 
