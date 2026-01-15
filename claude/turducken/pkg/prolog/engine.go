@@ -673,9 +673,58 @@ func (e *Engine) GetSequenceDiagram(ctx context.Context) (*SequenceDiagram, erro
 			sols.Close()
 		}
 
+		stateActors := make(map[string]string)
+		for _, query := range []string{
+			"actor_state(Actor, State, _).",
+			"actor_initial(Actor, State).",
+			"actor_transition(Actor, From, _Label, To).",
+		} {
+			sols, err = e.interpreter.QueryContext(ctx, query)
+			if err != nil {
+				continue
+			}
+			for sols.Next() {
+				switch query {
+				case "actor_transition(Actor, From, _Label, To).":
+					var result struct {
+						Actor interface{}
+						From  interface{}
+						To    interface{}
+					}
+					if err := sols.Scan(&result); err == nil {
+						actor := termToString(result.Actor)
+						from := termToString(result.From)
+						to := termToString(result.To)
+						if actor != "" && from != "" {
+							stateActors[from] = actor
+						}
+						if actor != "" && to != "" {
+							stateActors[to] = actor
+						}
+					}
+				default:
+					var result struct {
+						Actor interface{}
+						State interface{}
+					}
+					if err := sols.Scan(&result); err == nil {
+						actor := termToString(result.Actor)
+						state := termToString(result.State)
+						if actor != "" && state != "" {
+							stateActors[state] = actor
+						}
+					}
+				}
+			}
+			sols.Close()
+		}
+
 		extractActor := func(state string) string {
 			if state == "" {
 				return "system"
+			}
+			if actor, ok := stateActors[state]; ok && actor != "" {
+				return actor
 			}
 			if actors[state] {
 				return state

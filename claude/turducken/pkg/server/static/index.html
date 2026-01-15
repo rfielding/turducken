@@ -82,24 +82,9 @@
         
         .main-grid {
             display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 20px;
-            height: calc(100vh - 120px);
-        }
-
-        .main-grid.chat-collapsed {
             grid-template-columns: 1fr;
-        }
-
-        .main-grid.chat-collapsed .chat-panel {
-            display: none;
-        }
-        
-        @media (max-width: 1000px) {
-            .main-grid {
-                grid-template-columns: 1fr;
-                height: auto;
-            }
+            gap: 20px;
+            height: auto;
         }
         
         .panel {
@@ -144,12 +129,6 @@
             flex-shrink: 0;
         }
 
-        .tabs-actions {
-            margin-left: auto;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
         
         .tab {
             padding: 8px 16px;
@@ -404,6 +383,12 @@
         .viz-section {
             margin-bottom: 16px;
         }
+
+        .viz-description {
+            margin: 0 0 10px 0;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
     </style>
 </head>
 <body>
@@ -432,27 +417,19 @@
                     <button class="tab" onclick="switchTab('prompt')">🧭 Sys Prompt</button>
                     <button class="tab" onclick="switchTab('query')">🔍 Query</button>
                     <button class="tab" onclick="switchTab('check')">✓ Check</button>
-                    <div class="tabs-actions">
-                        <button id="chatToggleBtn" class="btn btn-secondary" onclick="toggleChat()">Hide Chat</button>
-                    </div>
                 </div>
                 
                 <!-- States Tab -->
                 <div id="tab-states" class="tab-content active">
                     <div class="panel-body">
                         <div class="viz-section">
-                            <h4 style="margin: 0 0 8px 0; color: var(--text-primary);">Interaction Diagram</h4>
-                            <div id="actorSummary" style="margin-bottom: 12px; padding: 10px 12px; background: var(--bg-tertiary); border-radius: 6px; border: 1px solid var(--border-color);">
-                                <div style="color: var(--text-secondary);">Load a spec to see actor descriptions.</div>
-                            </div>
                             <div id="statesSequenceOutput" class="mermaid-output">
                                 <div style="color: var(--text-secondary); text-align: center;">
-                                    Load a spec to visualize the interaction diagram
+                                    Load a spec to visualize the sequence
                                 </div>
                             </div>
                         </div>
                         <div class="viz-section">
-                            <h4 style="margin: 0 0 8px 0; color: var(--text-primary);">State Machines</h4>
                             <div id="statesMachineOutput" class="mermaid-output">
                                 <div style="color: var(--text-secondary); text-align: center;">
                                     Load a spec to visualize state machines
@@ -541,7 +518,7 @@ transition(busy, done, idle).
                 <!-- Check Tab -->
                 <div id="tab-check" class="tab-content">
                     <div class="panel-body">
-                        <h4 style="margin: 0 0 12px 0; color: var(--text-primary);">Properties</h4>
+                        <h4 style="margin: 0 0 12px 0; color: var(--text-primary);">CTL Properties</h4>
                         <div id="propertyList" style="margin-bottom: 16px;">
                             <div style="color: var(--text-secondary);">Load a spec to see defined properties</div>
                         </div>
@@ -570,7 +547,7 @@ transition(busy, done, idle).
             </div>
             
             <!-- Right Panel: Chat Only -->
-            <div class="panel chat-panel">
+            <div class="panel">
                 <div class="panel-header">
                     <span class="panel-title">💬 Chat</span>
                     <button class="btn btn-secondary" onclick="clearChat()" style="padding: 4px 12px;">Clear</button>
@@ -611,6 +588,8 @@ transition(busy, done, idle).
                 tertiaryColor: '#161b22'
             }
         });
+
+        const actorDescriptions = new Map();
         
         // Tab switching
         function switchTab(tabName) {
@@ -815,16 +794,6 @@ transition(busy, done, idle).
             await renderStates();
         }
 
-        function toggleChat() {
-            const grid = document.querySelector('.main-grid');
-            const button = document.getElementById('chatToggleBtn');
-            if (!grid || !button) {
-                return;
-            }
-            const collapsed = grid.classList.toggle('chat-collapsed');
-            button.textContent = collapsed ? 'Show Chat' : 'Hide Chat';
-        }
-        
         function clearChat() {
             document.getElementById('chatMessages').innerHTML = `<div class="message assistant">
                 <div class="message-label">Turducken</div>
@@ -833,8 +802,15 @@ transition(busy, done, idle).
         }
         
         async function renderStates() {
-            await visualize('sequence', 'statesSequenceOutput');
-            await visualize('statemachine', 'statesMachineOutput');
+            const descriptions = await loadVizDescriptions();
+            await visualize('sequence', 'statesSequenceOutput', {
+                title: 'Sequence',
+                description: descriptions.sequence
+            });
+            await visualize('statemachine', 'statesMachineOutput', {
+                title: 'State Machines',
+                description: descriptions.state
+            });
         }
 
         async function renderSimulation() {
@@ -842,7 +818,22 @@ transition(busy, done, idle).
             await visualize('pie', 'simulationPieOutput');
         }
 
-        async function visualize(type, outputId = 'vizOutput') {
+        async function loadVizDescriptions() {
+            try {
+                const resp = await fetch('/api/docs');
+                const data = await resp.json();
+                const docs = (data.success && data.docs) ? data.docs : [];
+                const docMap = new Map(docs.map(doc => [doc.topic, doc.content]));
+                const defaultSequence = 'An authentication system represented as CSP with checked CTL properties.';
+                const sequenceText = docMap.get('viz_sequence') || docMap.get('description') || docMap.get('overview') || defaultSequence;
+                const stateText = docMap.get('viz_statemachine') || '';
+                return { sequence: sequenceText, state: stateText };
+            } catch (_err) {
+                return { sequence: '', state: '' };
+            }
+        }
+
+        async function visualize(type, outputId = 'vizOutput', opts = {}) {
             const output = document.getElementById(outputId);
             if (!output) {
                 return;
@@ -977,7 +968,13 @@ transition(busy, done, idle).
                 }
                 
                 if (mermaidCode) {
-                    output.innerHTML = `<pre class="mermaid">${mermaidCode}</pre>`;
+                    const titleHtml = opts.title
+                        ? `<div style="margin: 0 0 8px 0; color: var(--accent-blue); font-weight: 600;">${escapeHtml(opts.title)}</div>`
+                        : '';
+                    const descHtml = opts.description
+                        ? `<div class="viz-description" style="margin: 0 0 10px 0;">${escapeHtml(opts.description)}</div>`
+                        : '';
+                    output.innerHTML = `${titleHtml}${descHtml}<pre class="mermaid">${mermaidCode}</pre>`;
                     try {
                         await mermaid.run();
                     } catch (mermaidErr) {
@@ -1094,6 +1091,7 @@ transition(busy, done, idle).
                         overflow-x: auto;
                     ">
                         <h4 style="margin: 0 0 8px 0; color: var(--accent-blue);">${actor}</h4>
+                        ${actorDescriptions.get(actor) ? `<div style="margin: 0 0 8px 0; color: var(--text-secondary); font-size: 0.85rem;">${escapeHtml(actorDescriptions.get(actor))}</div>` : ''}
                         <div style="overflow-x: auto; min-width: max-content;">
                             <pre class="mermaid" style="margin: 0;">${code}</pre>
                         </div>
@@ -1140,6 +1138,7 @@ transition(busy, done, idle).
             }
             
             let code = 'sequenceDiagram\n';
+            code += '    title Sequence\n';
             
             if (data.lifelines) {
                 data.lifelines.forEach(l => {
@@ -1149,7 +1148,8 @@ transition(busy, done, idle).
             
             if (data.messages) {
                 data.messages.forEach(m => {
-                    code += `    ${m.from}->>${m.to}: ${m.label}\n`;
+                    const label = toUnicodeLogic(m.label);
+                    code += `    ${m.from}->>${m.to}: ${label}\n`;
                 });
             }
             
@@ -2085,34 +2085,32 @@ transition(busy, done, idle).
                 const actors = (actorsData.success && actorsData.actors) ? actorsData.actors : [];
                 const docsByTopic = new Map(docs.map(doc => [doc.topic, doc.content]));
                 
-                const renderActorCards = (targetId) => {
-                    const target = document.getElementById(targetId);
-                    if (!target) return;
-                    
-                    if (actors.length === 0) {
-                        target.innerHTML = '<div style="color: var(--text-secondary);">No actors defined. Add actor/1 facts.</div>';
-                        return;
+                actorDescriptions.clear();
+                const actorsByInitial = new Map();
+                actors.forEach(actor => {
+                    const roleKey = `role_${actor}`;
+                    const actorKey = `actor_${actor}`;
+                    const description = docsByTopic.get(roleKey) || docsByTopic.get(actorKey) || '';
+                    if (description) {
+                        actorDescriptions.set(actor, description);
                     }
-                    
-                    let html = '<div style="margin-bottom: 12px;">';
-                    html += '<div style="font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Actors</div>';
-                    
-                    actors.forEach(actor => {
-                        const roleKey = `role_${actor}`;
-                        const actorKey = `actor_${actor}`;
-                        const description = docsByTopic.get(roleKey) || docsByTopic.get(actorKey) || '';
-                        const fallback = `Add doc(role_${actor}, '...') to describe intent.`;
-                        html += `<div style="margin-bottom: 10px; padding: 8px 10px; background: var(--bg-secondary); border-radius: 4px; border: 1px solid var(--border-color);">`;
-                        html += `<div style="color: var(--accent-blue); font-weight: 600; font-size: 0.9rem;">${actor}</div>`;
-                        html += `<div style="color: var(--text-secondary); font-size: 0.85rem; margin-top: 4px;">${description || fallback}</div>`;
-                        html += `</div>`;
-                    });
-                    
-                    html += '</div>';
-                    target.innerHTML = html;
-                };
-                
-                renderActorCards('actorSummary');
+
+                    const initial = actor.slice(0, 1);
+                    if (!actorsByInitial.has(initial)) {
+                        actorsByInitial.set(initial, []);
+                    }
+                    actorsByInitial.get(initial).push(actor);
+                });
+
+                for (const [initial, names] of actorsByInitial.entries()) {
+                    if (names.length === 1) {
+                        const onlyActor = names[0];
+                        const description = actorDescriptions.get(onlyActor);
+                        if (description && !actorDescriptions.has(initial)) {
+                            actorDescriptions.set(initial, description);
+                        }
+                    }
+                }
                 
                 if (docs.length > 0) {
                     // Group docs by category based on topic prefix
