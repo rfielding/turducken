@@ -104,6 +104,13 @@ proc(Name, Definition).
 
 Sequence views are derived from channel usage (`send/4`, `recv/4`) and annotations.
 
+You can add message formats to show explicit data on the edges:
+
+```prolog
+message_format(req_ab_na, 'A,B,Na').
+message_format(ticket_kab, 'Kab,ticket_b').
+```
+
 ### Charts
 
 ```prolog

@@ -519,6 +519,32 @@ func (e *Engine) GetSequenceDiagram(ctx context.Context) (*SequenceDiagram, erro
 	}
 
 	// Get messages
+	formats := make(map[string]string)
+	sols, err = e.interpreter.QueryContext(ctx, "message_format(Label, Format).")
+	if err == nil {
+		for sols.Next() {
+			var result struct {
+				Label  interface{}
+				Format interface{}
+			}
+			if err := sols.Scan(&result); err == nil {
+				label := termToString(result.Label)
+				format := termToString(result.Format)
+				if label != "" && format != "" {
+					formats[label] = format
+				}
+			}
+		}
+		sols.Close()
+	}
+
+	formatLabel := func(msgLabel, displayLabel string) string {
+		if format, ok := formats[msgLabel]; ok && format != "" {
+			return fmt.Sprintf("%s: %s", displayLabel, format)
+		}
+		return displayLabel
+	}
+
 	sols, err = e.interpreter.QueryContext(ctx, "message(Seq, From, To, Label).")
 	if err == nil {
 		for sols.Next() {
@@ -598,7 +624,7 @@ func (e *Engine) GetSequenceDiagram(ctx context.Context) (*SequenceDiagram, erro
 								Seq:   seqNum,
 								From:  from,
 								To:    to,
-								Label: label,
+								Label: formatLabel(label, label),
 							})
 							seqNum++
 
@@ -738,7 +764,7 @@ func (e *Engine) GetSequenceDiagram(ctx context.Context) (*SequenceDiagram, erro
 					Seq:   seqNum,
 					From:  sender,
 					To:    receiver,
-					Label: label,
+					Label: formatLabel(key.Msg, label),
 				})
 				seqNum++
 
