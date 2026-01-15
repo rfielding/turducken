@@ -10,12 +10,9 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
-
-	"sort"
 
 	"github.com/rfielding/turducken/pkg/llm"
 	"github.com/rfielding/turducken/pkg/prolog"
@@ -35,6 +32,9 @@ type Server struct {
 	mu         sync.RWMutex
 	counters   map[string]int64
 	timeSeries []TimePoint
+
+	// Cached simulation result - computed once when spec loads
+	cachedSimulation *SimulationResult
 }
 
 type TimePoint struct {
@@ -126,7 +126,6 @@ func (s *Server) ListenAndServe(addr string) error {
 	mux.HandleFunc("/api/metrics", s.handleMetrics)
 	mux.HandleFunc("/api/openapi", s.handleOpenAPI)
 	mux.HandleFunc("/api/simulate", s.handleSimulate) // Add this line
-	mux.HandleFunc("/api/messages", s.handleMessages) // Add this line
 
 	// Static files (embedded)
 	mux.HandleFunc("/", s.handleStatic)
@@ -169,11 +168,14 @@ func (s *Server) handleSpec(w http.ResponseWriter, r *http.Request) {
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"success":    false,
 				"error":      err.Error(),
-				"source":     req.Source, // Return source for retry
-				"canAutoFix": true,       // Signal UI can try auto-fix
+				"source":     req.Source,
+				"canAutoFix": true,
 			})
 			return
 		}
+
+		// Run simulation immediately and cache the result
+		s.runAndCacheSimulation(1000)
 
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": true,
@@ -849,172 +851,99 @@ type SimulationEvent struct {
 	To    string `json:"to"`
 }
 
-// handleSimulate runs a simulation of the state machine
-func (s *Server) handleSimulate(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-	defer cancel()
-
-	stepsParam := r.URL.Query().Get("steps")
-	steps := 1000
-	if stepsParam != "" {
-		if n, err := strconv.Atoi(stepsParam); err == nil && n > 0 && n <= 10000 {
-			steps = n
-		}
-	}
+// runAndCacheSimulation runs the simulation and stores the result
+func (s *Server) runAndCacheSimulation(steps int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	result := SimulationResult{
 		ByType:   make(map[string]int64),
 		BySrc:    make(map[string]int64),
 		ByDst:    make(map[string]int64),
 		Timeline: make([]SimulationEvent, 0),
-		Total:    0,
-		Steps:    steps,
 	}
 
-	// Use GetStateMachine which properly extracts bindings
+	ctx := context.Background()
 	sm, err := s.engine.GetStateMachine(ctx)
-	if err != nil || len(sm.Initial) == 0 {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(result)
+	if err != nil || len(sm.Initial) == 0 || len(sm.Transitions) == 0 {
+		s.cachedSimulation = &result
 		return
 	}
 
-	// Build adjacency map
-	type trans struct{ from, label, to string }
-	adj := make(map[string][]trans)
-	for _, tr := range sm.Transitions {
-		adj[tr.From] = append(adj[tr.From], trans{tr.From, tr.Label, tr.To})
+	// Build transition map for quick lookup
+	transitionMap := make(map[string][]prolog.Transition)
+	for _, t := range sm.Transitions {
+		transitionMap[t.From] = append(transitionMap[t.From], t)
 	}
 
-	// Helper to extract actor from state name (e.g., "proposer_idle" -> "proposer")
+	// Extract actor from state name (e.g., "proposer_idle" -> "proposer")
 	extractActor := func(state string) string {
-		idx := strings.Index(state, "_")
-		if idx > 0 {
+		if idx := strings.Index(state, "_"); idx > 0 {
 			return state[:idx]
 		}
 		return state
 	}
 
 	// Run simulation - walk the state machine
-	current := sm.Initial[rand.Intn(len(sm.Initial))]
-
-	// Sample interval for timeline
-	sampleInterval := steps / 100
-	if sampleInterval < 1 {
-		sampleInterval = 1
+	currentStates := make(map[string]string)
+	for _, init := range sm.Initial {
+		actor := extractActor(init)
+		currentStates[actor] = init
 	}
 
 	for step := 0; step < steps; step++ {
-		outgoing := adj[current]
-		if len(outgoing) == 0 {
-			// Dead end - restart from random initial
-			current = sm.Initial[rand.Intn(len(sm.Initial))]
-			continue
+		// Collect all possible transitions from current states
+		var possibleTransitions []prolog.Transition
+		for _, state := range currentStates {
+			possibleTransitions = append(possibleTransitions, transitionMap[state]...)
 		}
 
-		// Pick random transition
-		tr := outgoing[rand.Intn(len(outgoing))]
+		if len(possibleTransitions) == 0 {
+			break
+		}
 
-		// Record this as a "message" event
-		fromActor := extractActor(tr.from)
-		toActor := extractActor(tr.to)
+		// Pick a random transition
+		t := possibleTransitions[rand.Intn(len(possibleTransitions))]
 
-		result.ByType[tr.label]++
-		result.BySrc[fromActor]++
-		result.ByDst[toActor]++
+		// Update state
+		actor := extractActor(t.From)
+		currentStates[actor] = t.To
+
+		// Record metrics
+		result.ByType[t.Label]++
+		result.BySrc[extractActor(t.From)]++
+		result.ByDst[extractActor(t.To)]++
 		result.Total++
 
-		// Sample timeline
-		if step%sampleInterval == 0 {
-			result.Timeline = append(result.Timeline, SimulationEvent{
-				Step:  step,
-				Label: tr.label,
-				From:  fromActor,
-				To:    toActor,
-			})
-		}
-
-		current = tr.to
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
-}
-
-type MessageStats struct {
-	ByType   map[string]int64 `json:"byType"`
-	BySrc    map[string]int64 `json:"bySrc"`
-	ByDst    map[string]int64 `json:"byDst"`
-	Timeline []MessagePoint   `json:"timeline"`
-	Total    int64            `json:"total"`
-}
-
-type MessagePoint struct {
-	Seq   int    `json:"seq"`
-	Src   string `json:"src"`
-	Dst   string `json:"dst"`
-	Label string `json:"label"`
-}
-
-// handleMessages provides statistics about messages in the system
-func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-	defer cancel()
-
-	result := MessageStats{
-		ByType:   make(map[string]int64),
-		BySrc:    make(map[string]int64),
-		ByDst:    make(map[string]int64),
-		Timeline: make([]MessagePoint, 0),
-		Total:    0,
-	}
-
-	// Query all messages: message(Seq, From, To, Label)
-	msgResults, _ := s.engine.Query(ctx, "message(Seq, From, To, Label).")
-
-	type msg struct {
-		seq   int
-		from  string
-		to    string
-		label string
-	}
-	var messages []msg
-
-	for _, row := range msgResults {
-		seqStr := row["Seq"]
-		seq := 0
-		if seqStr != "" {
-			seq, _ = strconv.Atoi(seqStr)
-		}
-
-		from := row["From"]
-		to := row["To"]
-		label := row["Label"]
-
-		if from != "" && to != "" && label != "" {
-			messages = append(messages, msg{seq, from, to, label})
-		}
-	}
-
-	// Sort by sequence number
-	sort.Slice(messages, func(i, j int) bool {
-		return messages[i].seq < messages[j].seq
-	})
-
-	// Build stats
-	for _, m := range messages {
-		result.ByType[m.label]++
-		result.BySrc[m.from]++
-		result.ByDst[m.to]++
-		result.Timeline = append(result.Timeline, MessagePoint{
-			Seq:   m.seq,
-			Src:   m.from,
-			Dst:   m.to,
-			Label: m.label,
+		result.Timeline = append(result.Timeline, SimulationEvent{
+			Step:  step,
+			Label: t.Label,
+			From:  t.From,
+			To:    t.To,
 		})
-		result.Total++
 	}
 
+	s.cachedSimulation = &result
+}
+
+// handleSimulate returns the cached simulation result
+func (s *Server) handleSimulate(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+
+	s.mu.RLock()
+	result := s.cachedSimulation
+	s.mu.RUnlock()
+
+	if result == nil {
+		// No simulation cached, return empty result
+		json.NewEncoder(w).Encode(SimulationResult{
+			ByType:   make(map[string]int64),
+			BySrc:    make(map[string]int64),
+			ByDst:    make(map[string]int64),
+			Timeline: make([]SimulationEvent, 0),
+		})
+		return
+	}
+
 	json.NewEncoder(w).Encode(result)
 }

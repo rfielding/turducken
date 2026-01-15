@@ -338,6 +338,8 @@
             display: none;
             flex: 1;
             flex-direction: column;
+            min-height: 0;
+            overflow: hidden;
         }
         
         .tab-content.active {
@@ -410,8 +412,10 @@
         <div class="main-grid">
             <!-- Left Panel: Spec & Visualization -->
             <div class="panel">
+                <!-- Add new tab button in the tabs div -->
                 <div class="tabs">
                     <button class="tab active" onclick="switchTab('viz')">📊 Visualize</button>
+                    <button class="tab" onclick="switchTab('docs')">📖 Docs</button>
                     <button class="tab" onclick="switchTab('spec')">📝 Prolog</button>
                     <button class="tab" onclick="switchTab('query')">🔍 Query</button>
                     <button class="tab" onclick="switchTab('check')">✓ Check</button>
@@ -494,6 +498,15 @@ transition(busy, done, idle).
                         <div id="checkResult"></div>
                     </div>
                 </div>
+                
+                <!-- Docs Tab -->
+                <div id="tab-docs" class="tab-content">
+                    <div class="panel-body" style="overflow-y: auto; min-height: 0; flex: 1;">
+                        <div id="docsContent" style="overflow-y: auto; height: 100%;">
+                            <div style="color: var(--text-secondary);">Load a spec to see documentation</div>
+                        </div>
+                    </div>
+                </div>
             </div>
             
             <!-- Right Panel: Chat Only -->
@@ -563,6 +576,7 @@ transition(busy, done, idle).
                 if (data.success) {
                     setStatus('Spec applied successfully!', 'success');
                     loadProperties();
+                    loadDocs();  // Add this line
                 } else {
                     setStatus(`Spec error: ${data.error}`, 'error');
                     console.error('Prolog error:', data.error);
@@ -1227,6 +1241,7 @@ transition(busy, done, idle).
         
         // Initialize on page load
         loadProperties();
+        loadDocs();
         
         window.addEventListener('load', () => {
             document.getElementById('vizOutput').innerHTML = '<div style="color: var(--text-secondary);">Select a visualization type above, or load a spec first.</div>';
@@ -1304,6 +1319,130 @@ transition(busy, done, idle).
             
             return code;
         }
+        
+        // Add this function and call it when spec loads:
+
+        async function loadDocs() {
+            try {
+                const resp = await fetch('/api/docs');
+                const data = await resp.json();
+                
+                const container = document.getElementById('docsContent');
+                if (data.success && data.docs && data.docs.length > 0) {
+                    // Group docs by category based on topic prefix
+                    const sections = {
+                        'Overview': [],
+                        'Roles': [],
+                        'Phases': [],
+                        'Safety': [],
+                        'Visualizations': [],
+                        'Other': []
+                    };
+                    
+                    data.docs.forEach(doc => {
+                        const topic = doc.topic || '';
+                        if (topic === 'title' || topic === 'version' || topic === 'author' || topic === 'overview' || topic === 'description') {
+                            sections['Overview'].push(doc);
+                        } else if (topic.startsWith('role_')) {
+                            sections['Roles'].push(doc);
+                        } else if (topic.startsWith('phase')) {
+                            sections['Phases'].push(doc);
+                        } else if (topic.startsWith('safety_')) {
+                            sections['Safety'].push(doc);
+                        } else if (topic.startsWith('viz_')) {
+                            sections['Visualizations'].push(doc);
+                        } else {
+                            sections['Other'].push(doc);
+                        }
+                    });
+                    
+                    let html = '';
+                    
+                    // Render Overview section specially
+                    if (sections['Overview'].length > 0) {
+                        const titleDoc = sections['Overview'].find(d => d.topic === 'title');
+                        const versionDoc = sections['Overview'].find(d => d.topic === 'version');
+                        const overviewDoc = sections['Overview'].find(d => d.topic === 'overview');
+                        const descDoc = sections['Overview'].find(d => d.topic === 'description');
+                        
+                        html += `<div style="margin-bottom: 24px;">`;
+                        if (titleDoc) {
+                            html += `<h2 style="color: var(--accent-blue); margin: 0;">${titleDoc.content}</h2>`;
+                        }
+                        if (versionDoc) {
+                            html += `<div style="color: var(--text-secondary); font-size: 0.85rem;">Version ${versionDoc.content}</div>`;
+                        }
+                        if (overviewDoc) {
+                            html += `<p style="margin-top: 12px; color: var(--text-primary);">${overviewDoc.content}</p>`;
+                        }
+                        if (descDoc) {
+                            html += `<p style="margin-top: 8px; color: var(--text-secondary);">${descDoc.content}</p>`;
+                        }
+                        html += `</div>`;
+                    }
+                    
+                    // Render other sections
+                    const sectionOrder = ['Roles', 'Phases', 'Safety', 'Visualizations', 'Other'];
+                    for (const sectionName of sectionOrder) {
+                        const docs = sections[sectionName];
+                        if (docs.length === 0) continue;
+                        
+                        html += `<div style="margin-bottom: 20px;">`;
+                        html += `<h3 style="color: var(--accent-purple); margin: 0 0 8px 0; font-size: 1rem;">${sectionName}</h3>`;
+                        
+                        docs.forEach(doc => {
+                            // Clean up topic name for display
+                            let displayTopic = doc.topic
+                                .replace(/^(role_|phase|safety_|viz_)/, '')
+                                .replace(/_/g, ' ')
+                                .replace(/\b\w/g, c => c.toUpperCase());
+                            
+                            html += `<div style="margin-bottom: 12px; padding: 8px 12px; background: var(--bg-tertiary); border-radius: 4px;">`;
+                            html += `<div style="font-weight: 500; color: var(--accent-blue); font-size: 0.9rem;">${displayTopic}</div>`;
+                            html += `<div style="color: var(--text-primary); font-size: 0.85rem; margin-top: 4px;">${doc.content}</div>`;
+                            html += `</div>`;
+                        });
+                        
+                        html += `</div>`;
+                    }
+                    
+                    container.innerHTML = html;
+                } else {
+                    container.innerHTML = '<div style="color: var(--text-secondary);">No documentation in spec. Add doc(topic, content) facts.</div>';
+                }
+            } catch (err) {
+                console.error('Error loading docs:', err);
+            }
+        }
+        
+        // Update applySpec to also load docs
+        async function applySpec() {
+            const source = document.getElementById('specEditor').value;
+            try {
+                const resp = await fetch('/api/spec', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ source })
+                });
+                const data = await resp.json();
+                
+                if (data.success) {
+                    setStatus('Spec applied successfully!', 'success');
+                    loadProperties();
+                    loadDocs();  // Add this line
+                } else {
+                    setStatus(`Spec error: ${data.error}`, 'error');
+                    console.error('Prolog error:', data.error);
+                }
+            } catch (err) {
+                setStatus(`Failed: ${err.message}`, 'error');
+            }
+        }
+        
+        // Also load docs on page load
+        // Add after loadProperties() call:
+        loadProperties();
+        loadDocs();
     </script>
 </body>
 </html>

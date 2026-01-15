@@ -3,19 +3,48 @@
 % ============================================================================
 % Based on Leslie Lamport's TLA+ specification
 % Simplified single-decree Paxos (consensus on one value)
-%
-% Roles:
-%   - Proposers: propose values
-%   - Acceptors: vote on proposals  
-%   - Learners: learn decided values (implicit in this spec)
-%
-% Phases:
-%   Phase 1a: Proposer sends Prepare(n) to acceptors
-%   Phase 1b: Acceptor responds with Promise(n, accepted_value)
-%   Phase 2a: Proposer sends Accept(n, v) if majority promised
-%   Phase 2b: Acceptor accepts if n >= promised ballot
-%
 % ============================================================================
+
+% === OVERVIEW DOCUMENTATION ===
+doc(title, 'Paxos Consensus Algorithm').
+doc(version, '1.0.0').
+doc(author, 'Based on Leslie Lamport TLA+ specification').
+
+doc(overview, 'Paxos is a family of protocols for solving consensus in a network of unreliable processors. Consensus is the process of agreeing on one result among a group of participants.').
+
+doc(description, 'This specification models single-decree Paxos, which achieves consensus on a single value. The protocol proceeds in two phases: Prepare/Promise and Accept/Accepted.').
+
+% === ROLE DOCUMENTATION ===
+doc(role_proposer, 'Proposers are responsible for initiating consensus rounds. They send Prepare messages with ballot numbers and, upon receiving promises from a quorum, send Accept messages with a value.').
+
+doc(role_acceptor, 'Acceptors vote on proposals. They respond to Prepare messages with Promises (if the ballot is highest seen) and accept values in Accept messages (if ballot matches their promise).').
+
+doc(role_learner, 'Learners discover the decided value once a quorum of acceptors has accepted. In this simplified spec, learners are implicit.').
+
+% === PHASE DOCUMENTATION ===
+doc(phase1a, 'Phase 1a (Prepare): A proposer selects a ballot number n and sends Prepare(n) to a majority of acceptors.').
+
+doc(phase1b, 'Phase 1b (Promise): An acceptor receiving Prepare(n) responds with Promise(n) if n is greater than any ballot it has seen. The promise includes any value the acceptor has already accepted.').
+
+doc(phase2a, 'Phase 2a (Accept): If the proposer receives promises from a majority, it sends Accept(n, v) where v is either a value from a promise or a new value if no acceptor had accepted anything.').
+
+doc(phase2b, 'Phase 2b (Accepted): An acceptor receiving Accept(n, v) accepts it if n equals its promised ballot, and notifies learners.').
+
+% === SAFETY DOCUMENTATION ===
+doc(safety_agreement, 'Agreement: Only a single value can be chosen. Once a value is chosen, processes can only learn that value.').
+
+doc(safety_validity, 'Validity: Only a value that has been proposed can be chosen.').
+
+doc(safety_termination, 'Termination: Eventually a value is chosen (under fair scheduling and if failures stop).').
+
+% === VISUALIZATION GUIDE ===
+doc(viz_statemachine, 'The State Machine view shows two actors: proposer and acceptor. Each has states reflecting their role in the protocol. Transitions show the actions that move between states.').
+
+doc(viz_sequence, 'The Sequence Diagram shows a successful Paxos round with one proposer and three acceptors. Messages flow: Prepare -> Promise -> Accept -> Accepted.').
+
+doc(viz_pie, 'The Pie Charts show distribution of transitions by type, source actor, and destination actor from a 1000-step simulation random walk.').
+
+doc(viz_line, 'The Line Chart shows cumulative transition counts over simulation steps, revealing which transitions dominate the protocol execution.').
 
 % === ACTORS ===
 actor(proposer).
@@ -82,16 +111,3 @@ message(9, proposer1, acceptor3, accept_n_v).
 message(10, acceptor1, proposer1, accepted_n_v).
 message(11, acceptor2, proposer1, accepted_n_v).
 message(12, acceptor3, proposer1, accepted_n_v).
-
-% === API INFO ===
-api_info(title, 'Paxos Consensus').
-api_info(version, '1.0.0').
-api_info(description, 'Single-decree Paxos consensus algorithm').
-
-% === DOCUMENTATION ===
-doc(algorithm, 'Paxos achieves consensus among distributed nodes despite failures').
-doc(phase1, 'Prepare/Promise: Proposer acquires promises from majority').
-doc(phase2, 'Accept/Accepted: Proposer gets majority to accept value').
-doc(quorum, 'Majority quorum ensures any two quorums overlap').
-doc(ballot, 'Ballot numbers are unique and totally ordered').
-doc(preemption, 'Higher ballot preempts lower - ensures progress').
