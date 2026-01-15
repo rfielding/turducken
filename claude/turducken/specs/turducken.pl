@@ -5,8 +5,6 @@
 % ============================================================================
 
 % === PROJECT DOCUMENTATION ===
-% Use doc/2 for prose descriptions that aren't formalized
-
 doc(project, "Turducken is a formal specification tool that combines:
 - Prolog for logic and state machine definitions
 - CTL model checking for temporal property verification
@@ -17,148 +15,117 @@ The name 'turducken' reflects the layered architecture: an LLM wrapped
 around a Prolog engine, which itself reasons about state machines and
 temporal logic.").
 
-doc(architecture, "The system consists of four main actors:
-1. UI (browser) - handles user interaction and visualization
-2. HTTP Server - routes requests and manages state
-3. Prolog Engine - loads specs, runs queries, checks properties
-4. LLM Client - translates natural language to Prolog specs").
+doc(architecture, "The system consists of four actors, each with its own state machine:
+1. ui - handles user interaction (browser)
+2. http_server - routes requests and manages state
+3. prolog_engine - loads specs, runs queries, checks properties
+4. llm_client - translates natural language to Prolog specs
 
-doc(usage, "To use turducken:
-1. Describe your system in the Chat panel
-2. The LLM generates a Prolog specification
-3. Apply the spec to load it into the Prolog engine
-4. Visualize state machines, sequences, and charts
-5. Check temporal properties using CTL formulas").
+Actors communicate via synchronous message passing (see sequence diagram).").
 
-% === NAMED PROPERTIES (for Check tab) ===
-% property(Name, Description, Formula) - named CTL properties
-
-% filepath: /home/rfielding/code/turducken/claude/turducken/specs/turducken.pl
-% Change the property definitions to use string formulas:
-
-property(safety_preserve_spec, 
-    'If spec is loaded and query runs, spec remains loaded',
-    'ag(or(not(and(atom(has_spec), ex(atom(running_query)))), ax(atom(has_spec))))').
-
-property(liveness_chat_response,
-    'Chat responses are always eventually received', 
-    'ag(or(not(atom(waiting_response)), af(atom(accepting_input))))').
-
-property(no_deadlock,
-    'System can always eventually accept input',
-    'ag(ef(atom(accepting_input)))').
-
-property(can_always_reset,
-    'System can always eventually be reset',
-    'ag(ef(atom(no_spec)))').
-
-property(llm_error_recovery,
-    'LLM errors can always be recovered from',
-    'ag(or(not(atom(failed)), ef(atom(ready))))').
-
-property(server_invariant,
-    'Server is always listening or processing',
-    'ag(or(atom(listening), atom(processing)))').
+% === NAMED PROPERTIES ===
+property(no_deadlock, 'System can always eventually accept input', 'ag(ef(atom(accepting_input)))').
+property(can_always_reset, 'System can always eventually be reset', 'ag(ef(atom(no_spec)))').
+property(llm_error_recovery, 'LLM errors can always be recovered from', 'ag(or(not(atom(failed)), ef(atom(ready))))').
+property(server_invariant, 'Server is always listening or processing', 'ag(or(atom(listening), atom(processing)))').
 
 % === ACTORS ===
-actor(user, ui_idle).
-actor(http_server, server_ready).
-actor(prolog_engine, engine_empty).
-actor(llm_client, llm_idle).
+actor(ui).
+actor(http_server).
+actor(prolog_engine).
+actor(llm_client).
 
-% === STATES ===
-state(engine_empty, [can_load, no_spec]).
-state(engine_loaded, [can_query, can_reset, has_spec]).
-state(engine_error, [can_reset]).
-state(llm_idle, [ready]).
-state(llm_requesting, [busy]).
-state(llm_received, [has_response]).
-state(llm_error, [failed]).
-state(ui_idle, [accepting_input]).
-state(ui_chatting, [waiting_response]).
-state(ui_applying, [loading_spec]).
-state(ui_querying, [running_query]).
-state(server_ready, [listening]).
-state(server_handling, [processing]).
+% === ACTOR INITIAL STATES (all together) ===
+actor_initial(ui, ui_idle).
+actor_initial(http_server, server_ready).
+actor_initial(prolog_engine, engine_empty).
+actor_initial(llm_client, llm_idle).
 
-% === INITIAL STATES ===
-initial(engine_empty).
-initial(llm_idle).
-initial(ui_idle).
-initial(server_ready).
+% === ACTOR STATES (all together) ===
+actor_state(ui, ui_idle, [accepting_input]).
+actor_state(ui, ui_chatting, [waiting_response]).
+actor_state(ui, ui_applying, [loading_spec]).
+actor_state(ui, ui_querying, [running_query]).
+actor_state(http_server, server_ready, [listening]).
+actor_state(http_server, server_handling, [processing]).
+actor_state(prolog_engine, engine_empty, [can_load, no_spec]).
+actor_state(prolog_engine, engine_loaded, [can_query, can_reset, has_spec]).
+actor_state(prolog_engine, engine_error, [can_reset]).
+actor_state(llm_client, llm_idle, [ready]).
+actor_state(llm_client, llm_requesting, [busy]).
+actor_state(llm_client, llm_received, [has_response]).
+actor_state(llm_client, llm_error, [failed]).
 
-% === TRANSITIONS ===
-transition(engine_empty, load_spec, engine_loaded).
-transition(engine_empty, load_spec_error, engine_error).
-transition(engine_loaded, reset, engine_empty).
-transition(engine_loaded, load_spec, engine_loaded).
-transition(engine_loaded, query, engine_loaded).
-transition(engine_error, reset, engine_empty).
-transition(llm_idle, send_prompt, llm_requesting).
-transition(llm_requesting, receive_response, llm_received).
-transition(llm_requesting, timeout, llm_error).
-transition(llm_requesting, api_error, llm_error).
-transition(llm_received, extract_prolog, llm_idle).
-transition(llm_received, no_prolog, llm_idle).
-transition(llm_error, retry, llm_idle).
-transition(ui_idle, submit_chat, ui_chatting).
-transition(ui_idle, apply_spec, ui_applying).
-transition(ui_idle, run_query, ui_querying).
-transition(ui_chatting, chat_response, ui_idle).
-transition(ui_chatting, chat_error, ui_idle).
-transition(ui_applying, spec_loaded, ui_idle).
-transition(ui_applying, spec_error, ui_idle).
-transition(ui_querying, query_result, ui_idle).
-transition(server_ready, receive_request, server_handling).
-transition(server_handling, send_response, server_ready).
+% === ACTOR TRANSITIONS (all together) ===
+actor_transition(ui, ui_idle, submit_chat, ui_chatting).
+actor_transition(ui, ui_idle, apply_spec, ui_applying).
+actor_transition(ui, ui_idle, run_query, ui_querying).
+actor_transition(ui, ui_chatting, chat_response, ui_idle).
+actor_transition(ui, ui_chatting, chat_error, ui_idle).
+actor_transition(ui, ui_applying, spec_loaded, ui_idle).
+actor_transition(ui, ui_applying, spec_error, ui_idle).
+actor_transition(ui, ui_querying, query_result, ui_idle).
+actor_transition(http_server, server_ready, receive_request, server_handling).
+actor_transition(http_server, server_handling, send_response, server_ready).
+actor_transition(prolog_engine, engine_empty, load_spec, engine_loaded).
+actor_transition(prolog_engine, engine_empty, load_spec_error, engine_error).
+actor_transition(prolog_engine, engine_loaded, reset, engine_empty).
+actor_transition(prolog_engine, engine_loaded, load_spec, engine_loaded).
+actor_transition(prolog_engine, engine_loaded, query, engine_loaded).
+actor_transition(prolog_engine, engine_error, reset, engine_empty).
+actor_transition(llm_client, llm_idle, send_prompt, llm_requesting).
+actor_transition(llm_client, llm_requesting, receive_response, llm_received).
+actor_transition(llm_client, llm_requesting, timeout, llm_error).
+actor_transition(llm_client, llm_requesting, api_error, llm_error).
+actor_transition(llm_client, llm_received, extract_prolog, llm_idle).
+actor_transition(llm_client, llm_received, no_prolog, llm_idle).
+actor_transition(llm_client, llm_error, retry, llm_idle).
 
-% === PROPS ===
-prop(engine_empty, can_load).
-prop(engine_empty, no_spec).
-prop(engine_loaded, can_query).
-prop(engine_loaded, can_reset).
-prop(engine_loaded, has_spec).
-prop(engine_error, can_reset).
-prop(llm_idle, ready).
-prop(llm_requesting, busy).
-prop(llm_received, has_response).
-prop(llm_error, failed).
-prop(ui_idle, accepting_input).
-prop(ui_chatting, waiting_response).
-prop(ui_applying, loading_spec).
-prop(ui_querying, running_query).
-prop(server_ready, listening).
-prop(server_handling, processing).
+% ============================================================================
+% DERIVED PREDICATES
+% ============================================================================
+prop(State, Prop) :- actor_state(_, State, Props), member(Prop, Props).
+initial(S) :- actor_initial(_, S).
+transition(From, Label, To) :- actor_transition(_, From, Label, To).
 
-% === SEQUENCE DIAGRAM ===
+% ============================================================================
+% INTERACTION DIAGRAM (how actors communicate)
+% ============================================================================
 lifeline(user).
-lifeline(browser).
-lifeline(server).
-lifeline(llm).
-lifeline(engine).
+lifeline(ui).
+lifeline(http_server).
+lifeline(llm_client).
+lifeline(prolog_engine).
 
-message(1, user, browser, describe_system).
-message(2, browser, server, post_chat).
-message(3, server, llm, prompt_context).
-message(4, llm, server, response_prolog).
-message(5, server, browser, json_response).
-message(6, browser, browser, populate_editor).
-message(7, user, browser, click_apply).
-message(8, browser, server, post_spec).
-message(9, server, engine, load_source).
-message(10, engine, server, success).
-message(11, server, browser, spec_loaded).
+% Chat flow
+message(1, user, ui, type_message).
+message(2, ui, http_server, post_chat).
+message(3, http_server, llm_client, send_prompt).
+message(4, llm_client, http_server, receive_response).
+message(5, http_server, ui, chat_response).
+message(6, ui, user, display_response).
 
-% === PIE CHART ===
-pie_slice(http_server, 20).
-pie_slice(prolog_engine, 35).
-pie_slice(llm_client, 25).
-pie_slice(ui_visualization, 20).
+% Apply spec flow
+message(7, user, ui, click_apply).
+message(8, ui, http_server, post_spec).
+message(9, http_server, prolog_engine, load_spec).
+message(10, prolog_engine, http_server, spec_loaded).
+message(11, http_server, ui, spec_loaded).
 
-% === LINE CHART ===
-line_point(messages, 1, 2).
-line_point(messages, 2, 4).
-line_point(messages, 3, 6).
-line_point(messages, 4, 8).
-line_point(messages, 5, 12).
-line_point(messages, 6, 16).
+% Query flow
+message(12, user, ui, run_query).
+message(13, ui, http_server, post_query).
+message(14, http_server, prolog_engine, query).
+message(15, prolog_engine, http_server, query_result).
+message(16, http_server, ui, query_result).
+
+% ============================================================================
+% SYNCHRONIZATION POINTS
+% ============================================================================
+sync(ui, http_server, submit_chat, receive_request).
+sync(http_server, llm_client, send_prompt, send_prompt).
+sync(llm_client, http_server, receive_response, send_response).
+sync(http_server, ui, chat_response, chat_response).
+sync(ui, http_server, apply_spec, receive_request).
+sync(http_server, prolog_engine, load_spec, load_spec).
+sync(prolog_engine, http_server, spec_loaded, send_response).

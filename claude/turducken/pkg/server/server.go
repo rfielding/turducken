@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rfielding/turducken/pkg/llm"
@@ -24,6 +25,54 @@ type Server struct {
 	engine   *prolog.Engine
 	llm      *llm.Client
 	specFile string
+	mux      *http.ServeMux
+
+	// Metrics
+	mu         sync.RWMutex
+	counters   map[string]int64
+	timeSeries []TimePoint
+}
+
+type TimePoint struct {
+	Time    time.Time `json:"time"`
+	Counter string    `json:"counter"`
+	Value   int64     `json:"value"`
+}
+
+func (s *Server) incCounter(name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.counters[name]++
+
+	// Record time series point
+	s.timeSeries = append(s.timeSeries, TimePoint{
+		Time:    time.Now(),
+		Counter: name,
+		Value:   s.counters[name],
+	})
+
+	// Keep only last 1000 points
+	if len(s.timeSeries) > 1000 {
+		s.timeSeries = s.timeSeries[len(s.timeSeries)-1000:]
+	}
+}
+
+func (s *Server) getCounters() map[string]int64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make(map[string]int64)
+	for k, v := range s.counters {
+		result[k] = v
+	}
+	return result
+}
+
+func (s *Server) getTimeSeries() []TimePoint {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]TimePoint, len(s.timeSeries))
+	copy(result, s.timeSeries)
+	return result
 }
 
 // New creates a new server instance
@@ -34,9 +83,11 @@ func New(specFile string) (*Server, error) {
 	}
 
 	s := &Server{
-		engine:   engine,
-		llm:      llm.New(),
-		specFile: specFile,
+		engine:     engine,
+		llm:        llm.New(),
+		specFile:   specFile,
+		counters:   make(map[string]int64),
+		timeSeries: []TimePoint{},
 	}
 
 	// Load spec file if provided
@@ -68,10 +119,12 @@ func (s *Server) ListenAndServe(addr string) error {
 	mux.HandleFunc("/api/properties", s.handleProperties)
 	mux.HandleFunc("/api/docs", s.handleDocs)
 	mux.HandleFunc("/api/actors", s.handleActors)
+	mux.HandleFunc("/api/metrics", s.handleMetrics)
 
 	// Static files (embedded)
 	mux.HandleFunc("/", s.handleStatic)
 
+	s.mux = mux
 	return http.ListenAndServe(addr, mux)
 }
 
@@ -119,6 +172,8 @@ func (s *Server) handleSpec(w http.ResponseWriter, r *http.Request) {
 			"success": true,
 		})
 
+		s.incCounter("spec_loads")
+
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -157,6 +212,8 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		"success": true,
 		"result":  result,
 	})
+
+	s.incCounter("queries")
 }
 
 // handleVisualize generates visualization data from the current spec
@@ -215,6 +272,8 @@ func (s *Server) handleVisualize(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(result)
+
+	s.incCounter("visualizations")
 }
 
 func (s *Server) extractStateMachine(ctx context.Context) (map[string]interface{}, error) {
@@ -313,6 +372,20 @@ func (s *Server) extractLine(ctx context.Context) (map[string]interface{}, error
 	}, nil
 }
 
+// ActorStateMachine represents a single actor's state machine
+type ActorStateMachine struct {
+	Actor       string              `json:"actor"`
+	States      []string            `json:"states"`
+	Transitions []map[string]string `json:"transitions"`
+	Initial     string              `json:"initial"`
+}
+
+// TODO: Implement when engine supports variable binding extraction
+func (s *Server) extractActorStateMachines(ctx context.Context) ([]ActorStateMachine, error) {
+	// Requires engine.GetActorStateMachines() to be implemented
+	return nil, nil
+}
+
 // handleChat handles LLM chat requests
 func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -353,6 +426,8 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		"response": response,
 		"prolog":   prologCode,
 	})
+
+	s.incCounter("chat_requests")
 }
 
 // handleCheck checks a CTL property
@@ -391,6 +466,8 @@ func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
 		"success":   true,
 		"satisfied": satisfied,
 	})
+
+	s.incCounter("ctl_checks")
 }
 
 // handleReset resets the Prolog engine
@@ -555,6 +632,16 @@ func (s *Server) handleActors(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"actors":  actors,
+	})
+}
+
+// handleMetrics returns server metrics
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"counters":   s.getCounters(),
+		"timeSeries": s.getTimeSeries(),
 	})
 }
 

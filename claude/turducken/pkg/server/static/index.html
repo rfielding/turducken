@@ -547,12 +547,9 @@ transition(busy, done, idle).
         }
         
         // API calls
+        // Regular apply - no auto-fix
         async function applySpec() {
             const source = document.getElementById('specEditor').value;
-            await applySpecWithAutoFix(source);
-        }
-        
-        async function applySpecWithAutoFix(source, retryCount = 0) {
             try {
                 const resp = await fetch('/api/spec', {
                     method: 'POST',
@@ -563,36 +560,13 @@ transition(busy, done, idle).
                 
                 if (data.success) {
                     setStatus('Spec applied successfully!', 'success');
-                    loadProperties();  // Refresh property list
-                    return true;
-                } else if (data.canAutoFix && retryCount < MAX_AUTO_FIX_RETRIES) {
-                    setStatus(`Spec error, asking LLM to fix (attempt ${retryCount + 1}/${MAX_AUTO_FIX_RETRIES})...`, 'error');
-                    
-                    // Ask LLM to fix the error
-                    const fixResp = await fetch('/api/chat', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            message: `The following Prolog code has an error. Please fix it and return only the corrected Prolog code.\n\nError: ${data.error}\n\nCode:\n\`\`\`prolog\n${source}\n\`\`\``,
-                            context: 'fix_error'
-                        })
-                    });
-                    const fixData = await fixResp.json();
-                    
-                    if (fixData.success && fixData.prolog) {
-                        // Recursively try the fixed code
-                        return await applySpecWithAutoFix(fixData.prolog, retryCount + 1);
-                    } else {
-                        setStatus(`Auto-fix failed: ${fixData.error || 'No fixed code returned'}`, 'error');
-                        return false;
-                    }
+                    loadProperties();
                 } else {
                     setStatus(`Spec error: ${data.error}`, 'error');
-                    return false;
+                    console.error('Prolog error:', data.error);
                 }
             } catch (err) {
                 setStatus(`Failed: ${err.message}`, 'error');
-                return false;
             }
         }
         
@@ -769,397 +743,379 @@ transition(busy, done, idle).
                         mermaidCode = generateSequenceMermaid(data.sequence);
                         break;
                     case 'pie':
-                        mermaidCode = generatePieMermaid(data.pie);
+                        // Fetch real metrics
+                        const metricsResp = await fetch('/api/metrics');
+                        const metrics = await metricsResp.json();
+                        if (metrics.counters) {
+                            const slices = Object.entries(metrics.counters).map(([label, value]) => ({
+                                label,
+                                value
+                            }));
+                            mermaidCode = generatePieMermaid({ slices });
+                        }
                         break;
                     case 'line':
-                        mermaidCode = generateLineMermaid(data.line);
+                        // Fetch real metrics time series
+                        const tsResp = await fetch('/api/metrics');
+                        const tsData = await tsResp.json();
+                        if (tsData.timeSeries && tsData.timeSeries.length > 0) {
+                            // Group by counter name
+                            const seriesMap = new Map();
+                            tsData.timeSeries.forEach((pt, idx) => {
+                                if (!seriesMap.has(pt.counter)) {
+                                    seriesMap.set(pt.counter, []);
+                                }
+                                seriesMap.get(pt.counter).push({ x: idx, y: pt.value });
+                            });
+                            
+                            const series = Array.from(seriesMap.entries()).map(([name, points]) => ({
+                                name,
+                                points
+                            }));
+                            mermaidCode = generateLineMermaid({ series });
+                        }
                         break;
                 }
                 
                 if (mermaidCode) {
-                    output.innerHTML = `<pre class="mermaid">${mermaidCode}</pre>`;
-                    try {
-                        await mermaid.run();
-                    } catch (mermaidErr) {
-                        console.error('Mermaid error:', mermaidErr, 'Code:', mermaidCode);
-                        output.innerHTML = `<div style="color: var(--accent-red);">Mermaid syntax error</div><pre style="color: var(--text-secondary); font-size: 0.8rem; white-space: pre-wrap;">${mermaidCode}</pre>`;
-                    }
-                } else {
-                    output.innerHTML = '<div style="color: var(--text-secondary);">No data to visualize. Load a specification first.</div>';
-                }
-            } catch (err) {
-                output.innerHTML = `<div style="color: var(--accent-red);">Error: ${err.message}</div>`;
-            }
-        }
-        
-        function generateStateMachineMermaid(data) {
-            if (!data || !data.transitions || data.transitions.length === 0) {
-                return null;  // Return null instead of hardcoded diagram
-            }
-            
-            let code = 'stateDiagram-v2\n';
-            
-            if (data.initial && data.initial.length > 0) {
-                data.initial.forEach(s => {
-                    code += `    [*] --> ${s}\n`;
-                });
-            }
-            
-            if (data.transitions) {
-                data.transitions.forEach(t => {
-                    code += `    ${t.from} --> ${t.to}: ${t.label}\n`;
-                });
-            }
-            
-            if (data.accepting && data.accepting.length > 0) {
-                data.accepting.forEach(s => {
-                    code += `    ${s} --> [*]\n`;
-                });
-            }
-            
-            return code;
-        }
-        
-        function generateSequenceMermaid(data) {
-            if (!data || !data.messages || data.messages.length === 0) {
-                return null;  // Return null instead of hardcoded diagram
-            }
-            
-            let code = 'sequenceDiagram\n';
-            
-            if (data.lifelines) {
-                data.lifelines.forEach(l => {
-                    code += `    participant ${l}\n`;
-                });
-            }
-            
-            if (data.messages) {
-                data.messages.forEach(m => {
-                    code += `    ${m.from}->>${m.to}: ${m.label}\n`;
-                });
-            }
-            
-            return code;
-        }
-        
-        function generatePieMermaid(data) {
-            if (!data || !data.slices || data.slices.length === 0) {
-                return `pie title Distribution
-    "A" : 40
-    "B" : 30
-    "C" : 30`;
-            }
-            
-            let code = 'pie title Distribution\n';
-            data.slices.forEach(s => {
-                code += `    "${s.label}" : ${s.value}\n`;
-            });
-            return code;
-        }
-        
-        function generateLineMermaid(data) {
-            if (!data || !data.series || data.series.length === 0) {
-                return null;
-            }
-            
-            // Collect all x values across all series for consistent axis
-            const allXValues = new Set();
-            data.series.forEach(series => {
-                if (series.points) {
-                    series.points.forEach(p => allXValues.add(p.x));
-                }
-            });
-            
-            if (allXValues.size === 0) {
-                return null;
-            }
-            
-            // Sort x values
-            const sortedX = [...allXValues].sort((a, b) => a - b);
-            const xValues = sortedX.map(x => `"${x}"`).join(', ');
-            
-            // Find max Y across all series
-            let maxY = 0;
-            data.series.forEach(series => {
-                if (series.points) {
-                    series.points.forEach(p => {
-                        if (p.y > maxY) maxY = p.y;
-                    });
-                }
-            });
-            maxY += 5;
-            
-            // Build chart with all series
-            let code = `xychart-beta
-    title "Line Chart"
-    x-axis [${xValues}]
-    y-axis "Value" 0 --> ${maxY}`;
-            
-            // Add each series as a line
-            data.series.forEach(series => {
-                if (series.points && series.points.length > 0) {
-                    // Create a map of x -> y for this series
-                    const pointMap = new Map();
-                    series.points.forEach(p => pointMap.set(p.x, p.y));
-                    
-                    // Generate y values aligned to the common x axis (use 0 for missing)
-                    const yValues = sortedX.map(x => pointMap.has(x) ? pointMap.get(x) : 0).join(', ');
-                    code += `\n    line [${yValues}]`;
-                }
-            });
-            
-            return code;
-        }
-        
-        // Example specifications
-        const examples = {
-            mutex: `% Mutual Exclusion Protocol
-state(free, [available]).
-state(locked, [busy]).
-
-initial(free).
-
-transition(free, acquire, locked).
-transition(locked, release, free).
-
-prop(free, available).
-prop(locked, busy).
-
-% Safety: can always eventually release
-% check_ctl(ag(ef(atom(available)))).`,
-
-            channel: `% Buffered Channel (CSP style)
-state(empty, [can_send]).
-state(has_one, [can_send, can_recv]).
-state(full, [can_recv]).
-
-initial(empty).
-
-% Send fills buffer
-transition(empty, send, has_one).
-transition(has_one, send, full).
-
-% Recv empties buffer
-transition(full, recv, has_one).
-transition(has_one, recv, empty).
-
-prop(empty, can_send).
-prop(has_one, can_send).
-prop(has_one, can_recv).
-prop(full, can_recv).
-
-% Property: from any reachable state, we can get back to empty
-% check_ctl(ag(ef(atom(can_send)))).`,
-
-            sequence: `% Request-Response Protocol
-lifeline(client).
-lifeline(server).
-lifeline(database).
-
-message(1, client, server, request).
-message(2, server, database, query).
-message(3, database, server, result).
-message(4, server, client, response).
-
-% Also model as state machine
-state(idle, []).
-state(requesting, []).
-state(querying, []).
-state(responding, []).
-
-initial(idle).
-accepting(idle).
-
-transition(idle, request, requesting).
-transition(requesting, query, querying).
-transition(querying, result, responding).
-transition(responding, response, idle).`
-        };
-        
-        function loadExample(name) {
-            document.getElementById('specEditor').value = examples[name];
-            switchTab('spec');
-        }
-        
-        // Add these functions to the script section
-
-        const MAX_AUTO_FIX_RETRIES = 3;
-        
-        async function loadProperties() {
-            try {
-                const resp = await fetch('/api/properties');
-                const data = await resp.json();
-                
-                const listDiv = document.getElementById('propertyList');
-                if (data.success && data.properties && data.properties.length > 0) {
-                    listDiv.innerHTML = data.properties.map(p => {
-                        let statusIcon = '';
-                        let statusColor = '';
-                        if (p.error) {
-                            statusIcon = '⚠️';
-                            statusColor = 'var(--accent-yellow)';
-                        } else if (p.satisfied === true) {
-                            statusIcon = '✓';
-                            statusColor = 'var(--accent-green)';
-                        } else if (p.satisfied === false) {
-                            statusIcon = '✗';
-                            statusColor = 'var(--accent-red)';
+                                    output.innerHTML = `<pre class="mermaid">${mermaidCode}</pre>`;
+                                    try {
+                                        await mermaid.run();
+                                    } catch (mermaidErr) {
+                                        console.error('Mermaid error:', mermaidErr, 'Code:', mermaidCode);
+                                        output.innerHTML = `<div style="color: var(--accent-red);">Mermaid syntax error</div><pre style="color: var(--text-secondary); font-size: 0.8rem; white-space: pre-wrap;">${mermaidCode}</pre>`;
+                                    }
+                                } else {
+                                    output.innerHTML = '<div style="color: var(--text-secondary);">No data to visualize. Load a specification first.</div>';
+                                }
+                            } catch (err) {
+                                output.innerHTML = `<div style="color: var(--accent-red);">Error: ${err.message}</div>`;
+                            }
                         }
                         
-                        return `
-                        <div style="margin-bottom: 8px; padding: 8px; background: var(--bg-tertiary); border-radius: 4px;">
-                            <div style="display: flex; justify-content: space-between; align-items: center;">
-                                <div style="flex: 1;">
-                                    <div style="display: flex; align-items: center; gap: 8px;">
-                                        <span style="color: ${statusColor}; font-size: 1.2rem;">${statusIcon}</span>
-                                        <strong style="color: var(--accent-blue);">${p.name}</strong>
-                                    </div>
-                                    <div style="font-size: 0.85rem; color: var(--text-secondary); margin-left: 28px;">${p.description}</div>
-                                    ${p.error ? `<div style="font-size: 0.8rem; color: var(--accent-red); margin-left: 28px;">Error: ${p.error}</div>` : ''}
-                                </div>
-                                <button class="btn btn-secondary" onclick="checkNamedProperty('${p.name}', '${p.formula.replace(/'/g, "\\'")}')">Recheck</button>
-                            </div>
-                        </div>
-                    `}).join('');
-                } else {
-                    listDiv.innerHTML = '<div style="color: var(--text-secondary);">No named properties defined in spec</div>';
-                }
-            } catch (err) {
-                console.error('Error loading properties:', err);
-            }
-        }
-
-        async function checkNamedProperty(name, formula) {
-            document.getElementById('propertyInput').value = formula;
-            await checkProperty();
-        }
-        
-        // Modify existing applySpec to use auto-fix
-        async function applySpec() {
-            const source = document.getElementById('specEditor').value;
-            await applySpecWithAutoFix(source);
-        }
-        
-        async function applySpecWithAutoFix(source, retryCount = 0) {
-            try {
-                const resp = await fetch('/api/spec', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ source })
-                });
-                const data = await resp.json();
+                        function generateStateMachineMermaid(data) {
+                            if (!data || !data.transitions || data.transitions.length === 0) {
+                                return null;
+                            }
+                            
+                            let code = 'stateDiagram-v2\n';
+                            
+                            if (data.initial && data.initial.length > 0) {
+                                data.initial.forEach(s => {
+                                    code += `    [*] --> ${s}\n`;
+                                });
+                            }
+                            
+                            if (data.transitions) {
+                                data.transitions.forEach(t => {
+                                    code += `    ${t.from} --> ${t.to}: ${t.label}\n`;
+                                });
+                            }
+                            
+                            if (data.accepting && data.accepting.length > 0) {
+                                data.accepting.forEach(s => {
+                                    code += `    ${s} --> [*]\n`;
+                                });
+                            }
+                            
+                            return code;
+                        }
+                        
+                        function generateSequenceMermaid(data) {
+                            if (!data || !data.messages || data.messages.length === 0) {
+                                return null;
+                            }
+                            
+                            let code = 'sequenceDiagram\n';
+                            
+                            if (data.lifelines) {
+                                data.lifelines.forEach(l => {
+                                    code += `    participant ${l}\n`;
+                                });
+                            }
+                            
+                            if (data.messages) {
+                                data.messages.forEach(m => {
+                                    code += `    ${m.from}->>${m.to}: ${m.label}\n`;
+                                });
+                            }
+                            
+                            return code;
+                        }
+                        
+                        function generatePieMermaid(data) {
+                            if (!data || !data.slices || data.slices.length === 0) {
+                                return null;
+                            }
+                            
+                            let code = 'pie title Request Distribution\n';
+                            data.slices.forEach(s => {
+                                code += `    "${s.label}" : ${s.value}\n`;
+                            });
+                            return code;
+                        }
+                        
+                        function generateLineMermaid(data) {
+                            if (!data || !data.series || data.series.length === 0) {
+                                return null;
+                            }
+                            
+                            const allXValues = new Set();
+                            data.series.forEach(series => {
+                                if (series.points) {
+                                    series.points.forEach(p => allXValues.add(p.x));
+                                }
+                            });
+                            
+                            if (allXValues.size === 0) {
+                                return null;
+                            }
+                            
+                            const sortedX = [...allXValues].sort((a, b) => a - b);
+                            const xValues = sortedX.map(x => `"${x}"`).join(', ');
+                            
+                            let maxY = 0;
+                            data.series.forEach(series => {
+                                if (series.points) {
+                                    series.points.forEach(p => {
+                                        if (p.y > maxY) maxY = p.y;
+                                    });
+                                }
+                            });
+                            maxY += 5;
+                            
+                            let code = `xychart-beta
+                    title "Metrics Over Time"
+                    x-axis [${xValues}]
+                    y-axis "Value" 0 --> ${maxY}`;
+                            
+                            data.series.forEach(series => {
+                                if (series.points && series.points.length > 0) {
+                                    const pointMap = new Map();
+                                    series.points.forEach(p => pointMap.set(p.x, p.y));
+                                    const yValues = sortedX.map(x => pointMap.has(x) ? pointMap.get(x) : 0).join(', ');
+                                    code += `\n    line [${yValues}]`;
+                                }
+                            });
+                            
+                            return code;
+                        }
+                        
+                        // Example specifications
+                        const examples = {
+                            mutex: `% Mutual Exclusion Protocol
+                state(free, [available]).
+                state(locked, [busy]).
                 
-                if (data.success) {
-                    setStatus('Spec applied successfully!', 'success');
-                    loadProperties();  // Refresh property list
-                    return true;
-                } else if (data.canAutoFix && retryCount < MAX_AUTO_FIX_RETRIES) {
-                    setStatus(`Spec error, asking LLM to fix (attempt ${retryCount + 1}/${MAX_AUTO_FIX_RETRIES})...`, 'error');
-                    
-                    // Ask LLM to fix the error
-                    const fixResp = await fetch('/api/chat', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            message: `The following Prolog code has an error. Please fix it and return only the corrected Prolog code.\n\nError: ${data.error}\n\nCode:\n\`\`\`prolog\n${source}\n\`\`\``,
-                            context: 'fix_error'
-                        })
-                    });
-                    const fixData = await fixResp.json();
-                    
-                    if (fixData.success && fixData.prolog) {
-                        // Recursively try the fixed code
-                        return await applySpecWithAutoFix(fixData.prolog, retryCount + 1);
-                    } else {
-                        setStatus(`Auto-fix failed: ${fixData.error || 'No fixed code returned'}`, 'error');
-                        return false;
-                    }
-                } else {
-                    setStatus(`Spec error: ${data.error}`, 'error');
-                    return false;
-                }
-            } catch (err) {
-                setStatus(`Failed: ${err.message}`, 'error');
-                return false;
-            }
-        }
-        
-        // Initialize on page load
-        loadProperties();
-        
-        // On page load, clear any stale visualization state
-        window.addEventListener('load', () => {
-            document.getElementById('vizOutput').innerHTML = '<div style="color: var(--text-secondary);">No spec loaded. Apply a specification to see visualizations.</div>';
-        });
-        
-        // Keyboard shortcuts
-        document.addEventListener('keydown', (e) => {
-            if (e.ctrlKey || e.metaKey) {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    const activeTab = document.querySelector('.tab-content.active');
-                    if (activeTab?.id === 'tab-query') {
-                        runQuery();
-                    } else {
-                        sendChat();
-                    }
-                }
-            }
-        });
-        
-        // Enter to submit in query input
-        document.getElementById('queryInput').addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                runQuery();
-            }
-        });
-        
-        document.getElementById('propertyInput').addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                checkProperty();
-            }
-        });
-        
-        // Ctrl+Enter in chat
-        document.getElementById('chatInput').addEventListener('keydown', (e) => {
-            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-                e.preventDefault();
-                sendChat();
-            }
-        });
-        
-        function setStatus(message, type = 'info') {
-            const indicator = document.getElementById('statusIndicator');
-            const text = document.getElementById('statusText');
-            
-            text.textContent = message;
-            indicator.className = 'status-indicator';
-            
-            if (type === 'error') {
-                indicator.classList.add('error');
-            } else if (type === 'success') {
-                indicator.classList.add('success');
-            }
-        }
-    </script>
-</body>
-</html>
-
-% filepath: /home/rfielding/code/turducken/claude/turducken/specs/turducken.pl
-
-% === LINE CHART ===
-line_point(messages, 1, 2).
-line_point(messages, 2, 4).
-line_point(messages, 3, 6).
-line_point(messages, 4, 8).
-line_point(messages, 5, 12).
-line_point(messages, 6, 16).
-
-line_point(errors, 1, 1).
-line_point(errors, 2, 1).
-line_point(errors, 3, 2).
-line_point(errors, 4, 1).
-line_point(errors, 5, 3).
-line_point(errors, 6, 2).
+                initial(free).
+                
+                transition(free, acquire, locked).
+                transition(locked, release, free).
+                
+                prop(free, available).
+                prop(locked, busy).
+                
+                property(no_deadlock, 'Can always release', 'ag(ef(atom(available)))').`,
+                
+                            channel: `% Buffered Channel (CSP style)
+                state(empty, [can_send]).
+                state(has_one, [can_send, can_recv]).
+                state(full, [can_recv]).
+                
+                initial(empty).
+                
+                transition(empty, send, has_one).
+                transition(has_one, send, full).
+                transition(full, recv, has_one).
+                transition(has_one, recv, empty).
+                
+                prop(empty, can_send).
+                prop(has_one, can_send).
+                prop(has_one, can_recv).
+                prop(full, can_recv).
+                
+                property(liveness, 'Can always send again', 'ag(ef(atom(can_send)))').`,
+                
+                            sequence: `% Request-Response Protocol
+                lifeline(client).
+                lifeline(server).
+                lifeline(database).
+                
+                message(1, client, server, request).
+                message(2, server, database, query).
+                message(3, database, server, result).
+                message(4, server, client, response).
+                
+                state(idle, [ready]).
+                state(requesting, [busy]).
+                state(querying, [busy]).
+                state(responding, [busy]).
+                
+                initial(idle).
+                accepting(idle).
+                
+                transition(idle, request, requesting).
+                transition(requesting, query, querying).
+                transition(querying, result, responding).
+                transition(responding, response, idle).
+                
+                prop(idle, ready).
+                prop(requesting, busy).
+                prop(querying, busy).
+                prop(responding, busy).
+                
+                property(completes, 'Requests complete', 'ag(or(not(atom(busy)), af(atom(ready))))').`
+                        };
+                        
+                        function loadExample(name) {
+                            document.getElementById('specEditor').value = examples[name];
+                            switchTab('spec');
+                        }
+                        
+                        const MAX_AUTO_FIX_RETRIES = 3;
+                        
+                        async function loadProperties() {
+                            try {
+                                const resp = await fetch('/api/properties');
+                                const data = await resp.json();
+                                
+                                const listDiv = document.getElementById('propertyList');
+                                if (data.success && data.properties && data.properties.length > 0) {
+                                    listDiv.innerHTML = data.properties.map(p => {
+                                        let statusIcon = '';
+                                        let statusColor = '';
+                                        if (p.error) {
+                                            statusIcon = '⚠️';
+                                            statusColor = 'var(--accent-yellow)';
+                                        } else if (p.satisfied === true) {
+                                            statusIcon = '✓';
+                                            statusColor = 'var(--accent-green)';
+                                        } else if (p.satisfied === false) {
+                                            statusIcon = '✗';
+                                            statusColor = 'var(--accent-red)';
+                                        }
+                                        
+                                        return `
+                                        <div style="margin-bottom: 8px; padding: 8px; background: var(--bg-tertiary); border-radius: 4px;">
+                                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                                <div style="flex: 1;">
+                                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                                        <span style="color: ${statusColor}; font-size: 1.2rem;">${statusIcon}</span>
+                                                        <strong style="color: var(--accent-blue);">${p.name}</strong>
+                                                    </div>
+                                                    <div style="font-size: 0.85rem; color: var(--text-secondary); margin-left: 28px;">${p.description}</div>
+                                                    ${p.error ? `<div style="font-size: 0.8rem; color: var(--accent-red); margin-left: 28px;">Error: ${p.error}</div>` : ''}
+                                                </div>
+                                                <button class="btn btn-secondary" onclick="checkNamedProperty('${p.name}', '${p.formula.replace(/'/g, "\\'")}')">Recheck</button>
+                                            </div>
+                                        </div>
+                                    `}).join('');
+                                } else {
+                                    listDiv.innerHTML = '<div style="color: var(--text-secondary);">No named properties defined in spec</div>';
+                                }
+                            } catch (err) {
+                                console.error('Error loading properties:', err);
+                            }
+                        }
+                
+                        async function checkNamedProperty(name, formula) {
+                            document.getElementById('propertyInput').value = formula;
+                            await checkProperty();
+                        }
+                        
+                        function escapeHtml(text) {
+                            const div = document.createElement('div');
+                            div.textContent = text;
+                            return div.innerHTML;
+                        }
+                        
+                        function formatResponse(text) {
+                            // Simple markdown-like formatting
+                            return escapeHtml(text)
+                                .replace(/```(\w+)?\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>')
+                                .replace(/`([^`]+)`/g, '<code>$1</code>')
+                                .replace(/\n/g, '<br>');
+                        }
+                        
+                        // Initialize on page load
+                        loadProperties();
+                        
+                        window.addEventListener('load', () => {
+                            document.getElementById('vizOutput').innerHTML = '<div style="color: var(--text-secondary);">Select a visualization type above, or load a spec first.</div>';
+                        });
+                        
+                        // Keyboard shortcuts
+                        document.getElementById('queryInput').addEventListener('keydown', (e) => {
+                            if (e.key === 'Enter') {
+                                e.preventDefault();
+                                runQuery();
+                            }
+                        });
+                        
+                        document.getElementById('propertyInput').addEventListener('keydown', (e) => {
+                            if (e.key === 'Enter') {
+                                e.preventDefault();
+                                checkProperty();
+                            }
+                        });
+                        
+                        document.getElementById('chatInput').addEventListener('keydown', (e) => {
+                            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                                e.preventDefault();
+                                sendChat();
+                            }
+                        });
+                        
+                        function setStatus(message, type = 'info') {
+                            const indicator = document.getElementById('statusIndicator');
+                            const text = document.getElementById('statusText');
+                            
+                            text.textContent = message;
+                            indicator.className = 'status-indicator';
+                            
+                            if (type === 'error') {
+                                indicator.classList.add('error');
+                            } else if (type === 'success') {
+                                indicator.classList.add('success');
+                            }
+                        }
+                        
+                        function switchProvider() {
+                            const provider = document.getElementById('providerSelect').value;
+                            fetch('/api/provider', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ provider })
+                            }).then(() => {
+                                setStatus(`Switched to ${provider}`, 'success');
+                            }).catch(err => {
+                                setStatus(`Failed to switch: ${err.message}`, 'error');
+                            });
+                        }
+                        
+                        function generateActorStateMachinesMermaid(actors) {
+                            if (!actors || actors.length === 0) {
+                                return null;
+                            }
+                            
+                            let code = '';
+                            actors.forEach((actor, idx) => {
+                                if (idx > 0) code += '\n\n';
+                                code += `stateDiagram-v2\n`;
+                                code += `    direction LR\n`;
+                                code += `    %% ${actor.actor}\n`;
+                                
+                                if (actor.initial) {
+                                    code += `    [*] --> ${actor.initial}\n`;
+                                }
+                                
+                                actor.transitions.forEach(t => {
+                                    code += `    ${t.from} --> ${t.to}: ${t.label}\n`;
+                                });
+                            });
+                            
+                            return code;
+                        }
+                    </script>
+                </body>
+                </html>
