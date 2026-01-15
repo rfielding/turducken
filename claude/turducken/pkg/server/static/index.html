@@ -746,70 +746,65 @@ transition(busy, done, idle).
             output.innerHTML = '<div class="loading"></div>';
             
             try {
-                // Pie and Line show simulation results from state machine execution
+                // Pie and Line show message traffic (from message/4 facts)
                 if (type === 'pie' || type === 'line') {
-                    const resp = await fetch('/api/simulate?steps=1000');
-                    const sim = await resp.json();
+                    const resp = await fetch('/api/visualize?type=sequence');
+                    const data = await resp.json();
+                    const messages = (data.sequence && data.sequence.messages) ? data.sequence.messages : [];
                     
-                    if (sim.total === 0) {
-                        output.innerHTML = '<div style="color: var(--text-secondary);">No state machine to simulate. Load a spec with initial/1 and transition/3.</div>';
+                    if (messages.length === 0) {
+                        output.innerHTML = '<div style="color: var(--text-secondary);">No messages to chart. Add message/4 facts.</div>';
                         return;
                     }
                     
                     if (type === 'pie') {
-                        // Show three pie charts stacked vertically
-                        let html = '<div style="display: flex; flex-direction: column; gap: 20px;">';
+                        const counts = {};
+                        messages.forEach(m => {
+                            const key = m.from || 'unknown';
+                            counts[key] = (counts[key] || 0) + 1;
+                        });
                         
-                        const typeSlices = Object.entries(sim.byType).map(([label, value]) => `    "${label}" : ${value}`).join('\n');
-                        html += `<div><pre class="mermaid">pie title By Transition\n${typeSlices}</pre></div>`;
+                        const slices = Object.entries(counts)
+                            .map(([label, value]) => `    "${label}" : ${value}`)
+                            .join('\n');
                         
-                        const srcSlices = Object.entries(sim.bySrc).map(([label, value]) => `    "${label}" : ${value}`).join('\n');
-                        html += `<div><pre class="mermaid">pie title By Source Actor\n${srcSlices}</pre></div>`;
-                        
-                        const dstSlices = Object.entries(sim.byDst).map(([label, value]) => `    "${label}" : ${value}`).join('\n');
-                        html += `<div><pre class="mermaid">pie title By Dest Actor\n${dstSlices}</pre></div>`;
-                        
-                        html += '</div>';
-                        output.innerHTML = html;
+                        output.innerHTML = `<pre class="mermaid">pie title Messages By Sender\n${slices}</pre>`;
                         await mermaid.run();
                         return;
                     } else if (type === 'line') {
-                        // Cumulative transition counts over simulation steps
-                        // First pass: collect all label types
-                        const allTypes = new Set();
-                        sim.timeline.forEach(evt => allTypes.add(evt.label));
+                        const ordered = messages.map((m, idx) => ({
+                            seq: (typeof m.seq === 'number' && !Number.isNaN(m.seq)) ? m.seq : idx + 1,
+                            from: m.from || 'unknown'
+                        })).sort((a, b) => a.seq - b.seq);
                         
-                        // Initialize all types to 0
+                        const senders = new Set();
+                        ordered.forEach(m => senders.add(m.from));
+                        
                         const runningCounts = {};
-                        for (const t of allTypes) {
-                            runningCounts[t] = 0;
-                        }
-                        
-                        // Build cumulative data
-                        const cumulativeByType = new Map();
-                        for (const t of allTypes) {
-                            cumulativeByType.set(t, []);
+                        const cumulativeBySender = new Map();
+                        for (const sender of senders) {
+                            runningCounts[sender] = 0;
+                            cumulativeBySender.set(sender, []);
                         }
                         
                         const xValues = [];
-                        sim.timeline.forEach(evt => {
-                            runningCounts[evt.label]++;
-                            xValues.push(evt.step);
+                        ordered.forEach(evt => {
+                            runningCounts[evt.from]++;
+                            xValues.push(evt.seq);
                             
-                            // Snapshot all types at this point
-                            for (const [t, arr] of cumulativeByType) {
-                                arr.push(runningCounts[t]);
+                            for (const [sender, arr] of cumulativeBySender) {
+                                arr.push(runningCounts[sender]);
                             }
                         });
                         
                         if (xValues.length === 0) {
-                            output.innerHTML = '<div style="color: var(--text-secondary);">No simulation data.</div>';
+                            output.innerHTML = '<div style="color: var(--text-secondary);">No message data.</div>';
                             return;
                         }
                         
                         const maxPoints = 200;
                         let sampledX = xValues;
-                        let sampledSeries = cumulativeByType;
+                        let sampledSeries = cumulativeBySender;
                         
                         if (xValues.length > maxPoints) {
                             const stride = Math.ceil(xValues.length / maxPoints);
@@ -820,8 +815,8 @@ transition(busy, done, idle).
                             
                             sampledX = sampleIdx.map(i => xValues[i]);
                             sampledSeries = new Map();
-                            for (const [t, values] of cumulativeByType) {
-                                sampledSeries.set(t, sampleIdx.map(i => values[i]));
+                            for (const [sender, values] of cumulativeBySender) {
+                                sampledSeries.set(sender, sampleIdx.map(i => values[i]));
                             }
                         }
                         
@@ -829,11 +824,11 @@ transition(busy, done, idle).
                         const xAxis = sampledX.map(x => `"${x}"`).join(', ');
                         
                         let code = `xychart-beta
-    title "Transitions Over Simulation"
-    x-axis "Step" [${xAxis}]
+    title "Messages Over Sequence"
+    x-axis "Seq" [${xAxis}]
     y-axis "Count" 0 --> ${maxY}`;
                         
-                        for (const [t, values] of sampledSeries) {
+                        for (const [sender, values] of sampledSeries) {
                             code += `\n    line [${values.join(', ')}]`;
                         }
                         
