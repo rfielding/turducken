@@ -732,6 +732,88 @@ transition(busy, done, idle).
             output.innerHTML = '<div class="loading"></div>';
             
             try {
+                // Pie and Line show simulation results from state machine execution
+                if (type === 'pie' || type === 'line') {
+                    const resp = await fetch('/api/simulate?steps=1000');
+                    const sim = await resp.json();
+                    
+                    if (sim.total === 0) {
+                        output.innerHTML = '<div style="color: var(--text-secondary);">No state machine to simulate. Load a spec with initial/1 and transition/3.</div>';
+                        return;
+                    }
+                    
+                    if (type === 'pie') {
+                        // Show three pie charts stacked vertically
+                        let html = '<div style="display: flex; flex-direction: column; gap: 20px;">';
+                        
+                        const typeSlices = Object.entries(sim.byType).map(([label, value]) => `    "${label}" : ${value}`).join('\n');
+                        html += `<div><pre class="mermaid">pie title By Transition\n${typeSlices}</pre></div>`;
+                        
+                        const srcSlices = Object.entries(sim.bySrc).map(([label, value]) => `    "${label}" : ${value}`).join('\n');
+                        html += `<div><pre class="mermaid">pie title By Source Actor\n${srcSlices}</pre></div>`;
+                        
+                        const dstSlices = Object.entries(sim.byDst).map(([label, value]) => `    "${label}" : ${value}`).join('\n');
+                        html += `<div><pre class="mermaid">pie title By Dest Actor\n${dstSlices}</pre></div>`;
+                        
+                        html += '</div>';
+                        output.innerHTML = html;
+                        await mermaid.run();
+                        return;
+                    } else if (type === 'line') {
+                        // Cumulative transition counts over simulation steps
+                        // First pass: collect all label types
+                        const allTypes = new Set();
+                        sim.timeline.forEach(evt => allTypes.add(evt.label));
+                        
+                        // Initialize all types to 0
+                        const runningCounts = {};
+                        for (const t of allTypes) {
+                            runningCounts[t] = 0;
+                        }
+                        
+                        // Build cumulative data
+                        const cumulativeByType = new Map();
+                        for (const t of allTypes) {
+                            cumulativeByType.set(t, []);
+                        }
+                        
+                        const xValues = [];
+                        sim.timeline.forEach(evt => {
+                            runningCounts[evt.label]++;
+                            xValues.push(evt.step);
+                            
+                            // Snapshot all types at this point
+                            for (const [t, arr] of cumulativeByType) {
+                                arr.push(runningCounts[t]);
+                            }
+                        });
+                        
+                        if (xValues.length === 0) {
+                            output.innerHTML = '<div style="color: var(--text-secondary);">No simulation data.</div>';
+                            return;
+                        }
+                        
+                        const maxY = Math.max(...Object.values(runningCounts)) + 2;
+                        const xAxis = xValues.map(x => `"${x}"`).join(', ');
+                        
+                        let code = `xychart-beta
+    title "Transitions Over Simulation"
+    x-axis "Step" [${xAxis}]
+    y-axis "Count" 0 --> ${maxY}`;
+                        
+                        for (const [t, values] of cumulativeByType) {
+                            code += `\n    line [${values.join(', ')}]`;
+                        }
+                        
+                        const series = Array.from(cumulativeByType.keys()).map(name => ({ name }));
+                        const legendHtml = generateLineLegend({ series });
+                        output.innerHTML = `<pre class="mermaid">${code}</pre>${legendHtml}`;
+                        await mermaid.run();
+                        return;
+                    }
+                }
+                
+                // State machine and sequence use Prolog visualization data
                 const resp = await fetch(`/api/visualize?type=${type}`);
                 const data = await resp.json();
                 
@@ -739,12 +821,9 @@ transition(busy, done, idle).
                 
                 switch (type) {
                     case 'statemachine':
-                        // Check if we have actor-based state machines
                         if (data.stateMachine && data.stateMachine.transitions) {
-                            // Group transitions by actor prefix
                             const actorMachines = groupTransitionsByActor(data.stateMachine);
                             if (Object.keys(actorMachines).length > 1) {
-                                // Render as multiple diagrams
                                 output.innerHTML = generateActorPanes(actorMachines);
                                 await mermaid.run();
                                 return;
@@ -755,156 +834,93 @@ transition(busy, done, idle).
                     case 'sequence':
                         mermaidCode = generateSequenceMermaid(data.sequence);
                         break;
-                    case 'pie':
-                        // Fetch real metrics
-                        const metricsResp = await fetch('/api/metrics');
-                        const metrics = await metricsResp.json();
-                        if (metrics.counters) {
-                            const slices = Object.entries(metrics.counters).map(([label, value]) => ({
-                                label,
-                                value
-                            }));
-                            mermaidCode = generatePieMermaid({ slices });
-                        }
-                        break;
-                    case 'line':
-                        // Fetch real metrics time series
-                        const tsResp = await fetch('/api/metrics');
-                        const tsData = await tsResp.json();
-                        if (tsData.timeSeries && tsData.timeSeries.length > 0) {
-                            // Data already has cumulative values per counter
-                            // Group by counter, using relative time as x-axis
-                            const firstTime = new Date(tsData.timeSeries[0].time).getTime();
-                            const seriesMap = new Map();
-                            
-                            tsData.timeSeries.forEach(pt => {
-                                if (!seriesMap.has(pt.counter)) {
-                                    seriesMap.set(pt.counter, []);
-                                }
-                                // x = seconds since first point, y = cumulative value
-                                const x = (new Date(pt.time).getTime() - firstTime) / 1000;
-                                seriesMap.get(pt.counter).push({ x, y: pt.value });
-                            });
-                            
-                            // Sample each series to max 20 points for readability
-                            const samplePoints = (points, maxPoints) => {
-                                if (points.length <= maxPoints) return points;
-                                const step = (points.length - 1) / (maxPoints - 1);
-                                const sampled = [];
-                                for (let i = 0; i < maxPoints; i++) {
-                                    sampled.push(points[Math.round(i * step)]);
-                                }
-                                return sampled;
-                            };
-                            
-                            const series = Array.from(seriesMap.entries()).map(([name, points]) => ({
-                                name,
-                                points: samplePoints(points, 20)
-                            }));
-                            const lineData = { series };
-                            mermaidCode = generateLineMermaid(lineData);
-                            
-                            // Render with legend
-                            if (mermaidCode) {
-                                const legendHtml = generateLineLegend(lineData);
-                                output.innerHTML = `<pre class="mermaid">${mermaidCode}</pre>${legendHtml}`;
-                                try {
-                                    await mermaid.run();
-                                } catch (mermaidErr) {
-                                    console.error('Mermaid error:', mermaidErr);
-                                    output.innerHTML = `<div style="color: var(--accent-red);">Mermaid syntax error</div><pre style="color: var(--text-secondary); font-size: 0.8rem;">${mermaidCode}</pre>`;
-                                }
-                                return;
-                            }
-                        }
-                        break;
                 }
                 
                 if (mermaidCode) {
-                                    output.innerHTML = `<pre class="mermaid">${mermaidCode}</pre>`;
-                                    try {
-                                        await mermaid.run();
-                                    } catch (mermaidErr) {
-                                        console.error('Mermaid error:', mermaidErr, 'Code:', mermaidCode);
-                                        output.innerHTML = `<div style="color: var(--accent-red);">Mermaid syntax error</div><pre style="color: var(--text-secondary); font-size: 0.8rem; white-space: pre-wrap;">${mermaidCode}</pre>`;
-                                    }
-                                } else {
-                                    output.innerHTML = '<div style="color: var(--text-secondary);">No data to visualize. Load a specification first.</div>';
-                                }
-                            } catch (err) {
-                                output.innerHTML = `<div style="color: var(--accent-red);">Error: ${err.message}</div>`;
-                            }
-                        }
-                        
-                        function groupTransitionsByActor(sm) {
-                            const actors = {};
-                            
-                            // Dynamically extract prefixes from state names
-                            // Convention: states are named like "actorname_statename"
-                            const extractPrefix = (state) => {
-                                const idx = state.indexOf('_');
-                                if (idx > 0) {
-                                    return state.substring(0, idx + 1); // include underscore
-                                }
-                                return null;
-                            };
-                            
-                            // Build prefix map from all states we see
-                            const prefixToActor = new Map();
-                            
-                            sm.transitions.forEach(t => {
-                                [t.from, t.to].forEach(state => {
-                                    const prefix = extractPrefix(state);
-                                    if (prefix && !prefixToActor.has(prefix)) {
-                                        // Actor name is prefix without underscore
-                                        prefixToActor.set(prefix, prefix.slice(0, -1));
-                                    }
-                                });
-                            });
-                            
-                            sm.initial.forEach(s => {
-                                const prefix = extractPrefix(s);
-                                if (prefix && !prefixToActor.has(prefix)) {
-                                    prefixToActor.set(prefix, prefix.slice(0, -1));
-                                }
-                            });
-                            
-                            // Group transitions by actor
-                            sm.transitions.forEach(t => {
-                                const prefix = extractPrefix(t.from) || extractPrefix(t.to);
-                                if (!prefix) return;
-                                
-                                const actor = prefixToActor.get(prefix);
-                                if (!actor) return;
-                                
-                                if (!actors[actor]) {
-                                    actors[actor] = { transitions: [], initial: [] };
-                                }
-                                actors[actor].transitions.push(t);
-                            });
-                            
-                            // Add initial states
-                            sm.initial.forEach(s => {
-                                const prefix = extractPrefix(s);
-                                if (!prefix) return;
-                                
-                                const actor = prefixToActor.get(prefix);
-                                if (!actor) return;
-                                
-                                if (!actors[actor]) {
-                                    actors[actor] = { transitions: [], initial: [] };
-                                }
-                                actors[actor].initial.push(s);
-                            });
-                            
-                            return actors;
-                        }
-                        
-                        function generateActorPanes(actorMachines) {
-                            // Get actors in sorted order (no hardcoded list)
-                            const actorOrder = Object.keys(actorMachines).sort();
-                            
-                            let html = `<div style="
+                    output.innerHTML = `<pre class="mermaid">${mermaidCode}</pre>`;
+                    try {
+                        await mermaid.run();
+                    } catch (mermaidErr) {
+                        console.error('Mermaid error:', mermaidErr);
+                        output.innerHTML = `<div style="color: var(--accent-red);">Mermaid syntax error</div><pre style="color: var(--text-secondary); font-size: 0.8rem;">${mermaidCode}</pre>`;
+                    }
+                } else {
+                    output.innerHTML = '<div style="color: var(--text-secondary);">No data to visualize. Load a specification first.</div>';
+                }
+            } catch (err) {
+                output.innerHTML = `<div style="color: var(--accent-red);">Error: ${err.message}</div>`;
+            }
+        }
+        
+        function groupTransitionsByActor(sm) {
+            const actors = {};
+            
+            // Dynamically extract prefixes from state names
+            // Convention: states are named like "actorname_statename"
+            const extractPrefix = (state) => {
+                const idx = state.indexOf('_');
+                if (idx > 0) {
+                    return state.substring(0, idx + 1); // include underscore
+                }
+                return null;
+            };
+            
+            // Build prefix map from all states we see
+            const prefixToActor = new Map();
+            
+            sm.transitions.forEach(t => {
+                [t.from, t.to].forEach(state => {
+                    const prefix = extractPrefix(state);
+                    if (prefix && !prefixToActor.has(prefix)) {
+                        // Actor name is prefix without underscore
+                        prefixToActor.set(prefix, prefix.slice(0, -1));
+                    }
+                });
+            });
+            
+            sm.initial.forEach(s => {
+                const prefix = extractPrefix(s);
+                if (prefix && !prefixToActor.has(prefix)) {
+                    prefixToActor.set(prefix, prefix.slice(0, -1));
+                }
+            });
+            
+            // Group transitions by actor
+            sm.transitions.forEach(t => {
+                const prefix = extractPrefix(t.from) || extractPrefix(t.to);
+                if (!prefix) return;
+                
+                const actor = prefixToActor.get(prefix);
+                if (!actor) return;
+                
+                if (!actors[actor]) {
+                    actors[actor] = { transitions: [], initial: [] };
+                }
+                actors[actor].transitions.push(t);
+            });
+            
+            // Add initial states
+            sm.initial.forEach(s => {
+                const prefix = extractPrefix(s);
+                if (!prefix) return;
+                
+                const actor = prefixToActor.get(prefix);
+                if (!actor) return;
+                
+                if (!actors[actor]) {
+                    actors[actor] = { transitions: [], initial: [] };
+                }
+                actors[actor].initial.push(s);
+            });
+            
+            return actors;
+        }
+        
+        function generateActorPanes(actorMachines) {
+            // Get actors in sorted order (no hardcoded list)
+            const actorOrder = Object.keys(actorMachines).sort();
+            
+            let html = `<div style="
                 display: flex; 
                 flex-direction: column;
                 gap: 16px; 
@@ -947,139 +963,139 @@ transition(busy, done, idle).
             
             html += '</div>';
             return html;
-                        }
-                        
-                        function generateStateMachineMermaid(data) {
-                            if (!data || !data.transitions || data.transitions.length === 0) {
-                                return null;
-                            }
-                            
-                            let code = 'stateDiagram-v2\n';
-                            
-                            if (data.initial && data.initial.length > 0) {
-                                data.initial.forEach(s => {
-                                    code += `    [*] --> ${s}\n`;
-                                });
-                            }
-                            
-                            if (data.transitions) {
-                                data.transitions.forEach(t => {
-                                    code += `    ${t.from} --> ${t.to}: ${t.label}\n`;
-                                });
-                            }
-                            
-                            if (data.accepting && data.accepting.length > 0) {
-                                data.accepting.forEach(s => {
-                                    code += `    ${s} --> [*]\n`;
-                                });
-                            }
-                            
-                            return code;
-                        }
-                        
-                        function generateSequenceMermaid(data) {
-                            if (!data || !data.messages || data.messages.length === 0) {
-                                return null;
-                            }
-                            
-                            let code = 'sequenceDiagram\n';
-                            
-                            if (data.lifelines) {
-                                data.lifelines.forEach(l => {
-                                    code += `    participant ${l}\n`;
-                                });
-                            }
-                            
-                            if (data.messages) {
-                                data.messages.forEach(m => {
-                                    code += `    ${m.from}->>${m.to}: ${m.label}\n`;
-                                });
-                            }
-                            
-                            return code;
-                        }
-                        
-                        function generatePieMermaid(data) {
-                            if (!data || !data.slices || data.slices.length === 0) {
-                                return null;
-                            }
-                            
-                            let code = 'pie title Request Distribution\n';
-                            data.slices.forEach(s => {
-                                code += `    "${s.label}" : ${s.value}\n`;
-                            });
-                            return code;
-                        }
-                        
-                        function generateLineMermaid(data) {
-                            if (!data || !data.series || data.series.length === 0) {
-                                return null;
-                            }
-                            
-                            const allXValues = new Set();
-                            data.series.forEach(series => {
-                                if (series.points) {
-                                    series.points.forEach(p => allXValues.add(p.x));
-                                }
-                            });
-                            
-                            if (allXValues.size === 0) {
-                                return null;
-                            }
-                            
-                            const sortedX = [...allXValues].sort((a, b) => a - b);
-                            const xValues = sortedX.map(x => `"${x}"`).join(', ');
-                            
-                            let maxY = 0;
-                            data.series.forEach(series => {
-                                if (series.points) {
-                                    series.points.forEach(p => {
-                                        if (p.y > maxY) maxY = p.y;
-                                    });
-                                }
-                            });
-                            maxY += 5;
-                            
-                            let code = `xychart-beta
+        }
+        
+        function generateStateMachineMermaid(data) {
+            if (!data || !data.transitions || data.transitions.length === 0) {
+                return null;
+            }
+            
+            let code = 'stateDiagram-v2\n';
+            
+            if (data.initial && data.initial.length > 0) {
+                data.initial.forEach(s => {
+                    code += `    [*] --> ${s}\n`;
+                });
+            }
+            
+            if (data.transitions) {
+                data.transitions.forEach(t => {
+                    code += `    ${t.from} --> ${t.to}: ${t.label}\n`;
+                });
+            }
+            
+            if (data.accepting && data.accepting.length > 0) {
+                data.accepting.forEach(s => {
+                    code += `    ${s} --> [*]\n`;
+                });
+            }
+            
+            return code;
+        }
+        
+        function generateSequenceMermaid(data) {
+            if (!data || !data.messages || data.messages.length === 0) {
+                return null;
+            }
+            
+            let code = 'sequenceDiagram\n';
+            
+            if (data.lifelines) {
+                data.lifelines.forEach(l => {
+                    code += `    participant ${l}\n`;
+                });
+            }
+            
+            if (data.messages) {
+                data.messages.forEach(m => {
+                    code += `    ${m.from}->>${m.to}: ${m.label}\n`;
+                });
+            }
+            
+            return code;
+        }
+        
+        function generatePieMermaid(data) {
+            if (!data || !data.slices || data.slices.length === 0) {
+                return null;
+            }
+            
+            let code = 'pie title Request Distribution\n';
+            data.slices.forEach(s => {
+                code += `    "${s.label}" : ${s.value}\n`;
+            });
+            return code;
+        }
+        
+        function generateLineMermaid(data) {
+            if (!data || !data.series || data.series.length === 0) {
+                return null;
+            }
+            
+            const allXValues = new Set();
+            data.series.forEach(series => {
+                if (series.points) {
+                    series.points.forEach(p => allXValues.add(p.x));
+                }
+            });
+            
+            if (allXValues.size === 0) {
+                return null;
+            }
+            
+            const sortedX = [...allXValues].sort((a, b) => a - b);
+            const xValues = sortedX.map(x => `"${x}"`).join(', ');
+            
+            let maxY = 0;
+            data.series.forEach(series => {
+                if (series.points) {
+                    series.points.forEach(p => {
+                        if (p.y > maxY) maxY = p.y;
+                    });
+                }
+            });
+            maxY += 5;
+            
+            let code = `xychart-beta
     title "Metrics Over Time"
     x-axis [${xValues}]
     y-axis "Value" 0 --> ${maxY}`;
-                            
-                            data.series.forEach(series => {
-                                if (series.points && series.points.length > 0) {
-                                    const pointMap = new Map();
-                                    series.points.forEach(p => pointMap.set(p.x, p.y));
-                                    const yValues = sortedX.map(x => pointMap.has(x) ? pointMap.get(x) : 0).join(', ');
-                                    code += `\n    line [${yValues}]`;
-                                }
-                            });
-                            
-                            return code;
-                        }
-                        
-                        // Generate legend HTML for line chart
-                        function generateLineLegend(data) {
-                            if (!data || !data.series || data.series.length === 0) {
-                                return '';
-                            }
-                            
-                            const colors = ['#58a6ff', '#3fb950', '#f85149', '#d29922', '#a371f7', '#f778ba'];
-                            
-                            let html = '<div style="display: flex; flex-wrap: wrap; gap: 16px; margin-top: 12px; padding: 8px; background: var(--bg-tertiary); border-radius: 4px;">';
-                            data.series.forEach((series, i) => {
-                                const color = colors[i % colors.length];
-                                html += `<div style="display: flex; align-items: center; gap: 6px;">
-                                    <div style="width: 20px; height: 3px; background: ${color};"></div>
-                                    <span style="color: var(--text-secondary); font-size: 0.85rem;">${series.name}</span>
-                                </div>`;
-                            });
-                            html += '</div>';
-                            return html;
-                        }
-                        
-                        // Example specifications
-                        const examples = {
-                            mutex: `% Mutual Exclusion Protocol
+            
+            data.series.forEach(series => {
+                if (series.points && series.points.length > 0) {
+                    const pointMap = new Map();
+                    series.points.forEach(p => pointMap.set(p.x, p.y));
+                    const yValues = sortedX.map(x => pointMap.has(x) ? pointMap.get(x) : 0).join(', ');
+                    code += `\n    line [${yValues}]`;
+                }
+            });
+            
+            return code;
+        }
+        
+        // Generate legend HTML for line chart
+        function generateLineLegend(data) {
+            if (!data || !data.series || data.series.length === 0) {
+                return '';
+            }
+            
+            const colors = ['#58a6ff', '#3fb950', '#f85149', '#d29922', '#a371f7', '#f778ba'];
+            
+            let html = '<div style="display: flex; flex-wrap: wrap; gap: 16px; margin-top: 12px; padding: 8px; background: var(--bg-tertiary); border-radius: 4px;">';
+            data.series.forEach((series, i) => {
+                const color = colors[i % colors.length];
+                html += `<div style="display: flex; align-items: center; gap: 6px;">
+                    <div style="width: 20px; height: 3px; background: ${color};"></div>
+                    <span style="color: var(--text-secondary); font-size: 0.85rem;">${series.name}</span>
+                </div>`;
+            });
+            html += '</div>';
+            return html;
+        }
+        
+        // Example specifications
+        const examples = {
+            mutex: `% Mutual Exclusion Protocol
                 state(free, [available]).
                 state(locked, [busy]).
                 
@@ -1093,7 +1109,7 @@ transition(busy, done, idle).
                 
                 property(no_deadlock, 'Can always release', 'ag(ef(atom(available)))').`,
                 
-                            channel: `% Buffered Channel (CSP style)
+            channel: `% Buffered Channel (CSP style)
                 state(empty, [can_send]).
                 state(has_one, [can_send, can_recv]).
                 state(full, [can_recv]).
@@ -1112,7 +1128,7 @@ transition(busy, done, idle).
                 
                 property(liveness, 'Can always send again', 'ag(ef(atom(can_send)))').`,
                 
-                            sequence: `% Request-Response Protocol
+            sequence: `% Request-Response Protocol
                 lifeline(client).
                 lifeline(server).
                 lifeline(database).
@@ -1141,153 +1157,153 @@ transition(busy, done, idle).
                 prop(responding, busy).
                 
                 property(completes, 'Requests complete', 'ag(or(not(atom(busy)), af(atom(ready))))').`
-                        };
-                        
-                        function loadExample(name) {
-                            document.getElementById('specEditor').value = examples[name];
-                            switchTab('spec');
-                        }
-                        
-                        const MAX_AUTO_FIX_RETRIES = 3;
-                        
-                        async function loadProperties() {
-                            try {
-                                const resp = await fetch('/api/properties');
-                                const data = await resp.json();
-                                
-                                const listDiv = document.getElementById('propertyList');
-                                if (data.success && data.properties && data.properties.length > 0) {
-                                    listDiv.innerHTML = data.properties.map(p => {
-                                        let statusIcon = '';
-                                        let statusColor = '';
-                                        if (p.error) {
-                                            statusIcon = '⚠️';
-                                            statusColor = 'var(--accent-yellow)';
-                                        } else if (p.satisfied === true) {
-                                            statusIcon = '✓';
-                                            statusColor = 'var(--accent-green)';
-                                        } else if (p.satisfied === false) {
-                                            statusIcon = '✗';
-                                            statusColor = 'var(--accent-red)';
-                                        }
-                                        
-                                        return `
-                                        <div style="margin-bottom: 8px; padding: 8px; background: var(--bg-tertiary); border-radius: 4px;">
-                                            <div style="display: flex; align-items: center; gap: 8px;">
-                                                <span style="color: ${statusColor}; font-size: 1.2rem;">${statusIcon}</span>
-                                                <strong style="color: var(--accent-blue);">${p.name}</strong>
-                                            </div>
-                                            <div style="font-size: 0.85rem; color: var(--text-secondary); margin-left: 28px;">${p.description}</div>
-                                            <div style="font-size: 0.8rem; color: var(--accent-purple); margin-left: 28px; font-family: monospace;">${p.formula}</div>
-                                            ${p.error ? `<div style="font-size: 0.8rem; color: var(--accent-red); margin-left: 28px;">Error: ${p.error}</div>` : ''}
-                                        </div>
-                                    `}).join('');
-                                } else {
-                                    listDiv.innerHTML = '<div style="color: var(--text-secondary);">No properties defined in spec</div>';
-                                }
-                            } catch (err) {
-                                console.error('Error loading properties:', err);
-                            }
-                        }
+        };
+        
+        function loadExample(name) {
+            document.getElementById('specEditor').value = examples[name];
+            switchTab('spec');
+        }
+        
+        const MAX_AUTO_FIX_RETRIES = 3;
+        
+        async function loadProperties() {
+            try {
+                const resp = await fetch('/api/properties');
+                const data = await resp.json();
                 
-                        async function checkNamedProperty(name, formula) {
-                            document.getElementById('propertyInput').value = formula;
-                            await checkProperty();
+                const listDiv = document.getElementById('propertyList');
+                if (data.success && data.properties && data.properties.length > 0) {
+                    listDiv.innerHTML = data.properties.map(p => {
+                        let statusIcon = '';
+                        let statusColor = '';
+                        if (p.error) {
+                            statusIcon = '⚠️';
+                            statusColor = 'var(--accent-yellow)';
+                        } else if (p.satisfied === true) {
+                            statusIcon = '✓';
+                            statusColor = 'var(--accent-green)';
+                        } else if (p.satisfied === false) {
+                            statusIcon = '✗';
+                            statusColor = 'var(--accent-red)';
                         }
                         
-                        function escapeHtml(text) {
-                            const div = document.createElement('div');
-                            div.textContent = text;
-                            return div.innerHTML;
-                        }
-                        
-                        function formatResponse(text) {
-                            // Simple markdown-like formatting
-                            return escapeHtml(text)
-                                .replace(/```(\w+)?\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>')
-                                .replace(/`([^`]+)`/g, '<code>$1</code>')
-                                .replace(/\n/g, '<br>');
-                        }
-                        
-                        // Initialize on page load
-                        loadProperties();
-                        
-                        window.addEventListener('load', () => {
-                            document.getElementById('vizOutput').innerHTML = '<div style="color: var(--text-secondary);">Select a visualization type above, or load a spec first.</div>';
-                        });
-                        
-                        // Keyboard shortcuts
-                        document.getElementById('queryInput').addEventListener('keydown', (e) => {
-                            if (e.key === 'Enter') {
-                                e.preventDefault();
-                                runQuery();
-                            }
-                        });
-                        
-                        document.getElementById('propertyInput').addEventListener('keydown', (e) => {
-                            if (e.key === 'Enter') {
-                                e.preventDefault();
-                                checkProperty();
-                            }
-                        });
-                        
-                        document.getElementById('chatInput').addEventListener('keydown', (e) => {
-                            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-                                e.preventDefault();
-                                sendChat();
-                            }
-                        });
-                        
-                        function setStatus(message, type = 'info') {
-                            const indicator = document.getElementById('statusIndicator');
-                            const text = document.getElementById('statusText');
-                            
-                            text.textContent = message;
-                            indicator.className = 'status-indicator';
-                            
-                            if (type === 'error') {
-                                indicator.classList.add('error');
-                            } else if (type === 'success') {
-                                indicator.classList.add('success');
-                            }
-                        }
-                        
-                        function switchProvider() {
-                            const provider = document.getElementById('providerSelect').value;
-                            fetch('/api/provider', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ provider })
-                            }).then(() => {
-                                setStatus(`Switched to ${provider}`, 'success');
-                            }).catch(err => {
-                                setStatus(`Failed to switch: ${err.message}`, 'error');
-                            });
-                        }
-                        
-                        function generateActorStateMachinesMermaid(actors) {
-                            if (!actors || actors.length === 0) {
-                                return null;
-                            }
-                            
-                            let code = '';
-                            actors.forEach((actor, idx) => {
-                                if (idx > 0) code += '\n\n';
-                                code += `stateDiagram-v2\n`;
-                                code += `    direction LR\n`;
-                                code += `    %% ${actor.actor}\n`;
-                                
-                                if (actor.initial) {
-                                    code += `    [*] --> ${actor.initial}\n`;
-                                }
-                                
-                                actor.transitions.forEach(t => {
-                                    code += `    ${t.from} --> ${t.to}: ${t.label}\n`;
-                                });
-                            });
-                            
-                            return code;
-                        }
-                    </script>
-                </body>
-                </html>
+                        return `
+                        <div style="margin-bottom: 8px; padding: 8px; background: var(--bg-tertiary); border-radius: 4px;">
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <span style="color: ${statusColor}; font-size: 1.2rem;">${statusIcon}</span>
+                                <strong style="color: var(--accent-blue);">${p.name}</strong>
+                            </div>
+                            <div style="font-size: 0.85rem; color: var(--text-secondary); margin-left: 28px;">${p.description}</div>
+                            <div style="font-size: 0.8rem; color: var(--accent-purple); margin-left: 28px; font-family: monospace;">${p.formula}</div>
+                            ${p.error ? `<div style="font-size: 0.8rem; color: var(--accent-red); margin-left: 28px;">Error: ${p.error}</div>` : ''}
+                        </div>
+                    `}).join('');
+                } else {
+                    listDiv.innerHTML = '<div style="color: var(--text-secondary);">No properties defined in spec</div>';
+                }
+            } catch (err) {
+                console.error('Error loading properties:', err);
+            }
+        }
+        
+        async function checkNamedProperty(name, formula) {
+            document.getElementById('propertyInput').value = formula;
+            await checkProperty();
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        function formatResponse(text) {
+            // Simple markdown-like formatting
+            return escapeHtml(text)
+                .replace(/```(\w+)?\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>')
+                .replace(/`([^`]+)`/g, '<code>$1</code>')
+                .replace(/\n/g, '<br>');
+        }
+        
+        // Initialize on page load
+        loadProperties();
+        
+        window.addEventListener('load', () => {
+            document.getElementById('vizOutput').innerHTML = '<div style="color: var(--text-secondary);">Select a visualization type above, or load a spec first.</div>';
+        });
+        
+        // Keyboard shortcuts
+        document.getElementById('queryInput').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                runQuery();
+            }
+        });
+        
+        document.getElementById('propertyInput').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                checkProperty();
+            }
+        });
+        
+        document.getElementById('chatInput').addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                sendChat();
+            }
+        });
+        
+        function setStatus(message, type = 'info') {
+            const indicator = document.getElementById('statusIndicator');
+            const text = document.getElementById('statusText');
+            
+            text.textContent = message;
+            indicator.className = 'status-indicator';
+            
+            if (type === 'error') {
+                indicator.classList.add('error');
+            } else if (type === 'success') {
+                indicator.classList.add('success');
+            }
+        }
+        
+        function switchProvider() {
+            const provider = document.getElementById('providerSelect').value;
+            fetch('/api/provider', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ provider })
+            }).then(() => {
+                setStatus(`Switched to ${provider}`, 'success');
+            }).catch(err => {
+                setStatus(`Failed to switch: ${err.message}`, 'error');
+            });
+        }
+        
+        function generateActorStateMachinesMermaid(actors) {
+            if (!actors || actors.length === 0) {
+                return null;
+            }
+            
+            let code = '';
+            actors.forEach((actor, idx) => {
+                if (idx > 0) code += '\n\n';
+                code += `stateDiagram-v2\n`;
+                code += `    direction LR\n`;
+                code += `    %% ${actor.actor}\n`;
+                
+                if (actor.initial) {
+                    code += `    [*] --> ${actor.initial}\n`;
+                }
+                
+                actor.transitions.forEach(t => {
+                    code += `    ${t.from} --> ${t.to}: ${t.label}\n`;
+                });
+            });
+            
+            return code;
+        }
+    </script>
+</body>
+</html>

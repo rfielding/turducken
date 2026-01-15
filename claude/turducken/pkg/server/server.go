@@ -7,11 +7,15 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"sort"
 
 	"github.com/rfielding/turducken/pkg/llm"
 	"github.com/rfielding/turducken/pkg/prolog"
@@ -121,6 +125,8 @@ func (s *Server) ListenAndServe(addr string) error {
 	mux.HandleFunc("/api/actors", s.handleActors)
 	mux.HandleFunc("/api/metrics", s.handleMetrics)
 	mux.HandleFunc("/api/openapi", s.handleOpenAPI)
+	mux.HandleFunc("/api/simulate", s.handleSimulate) // Add this line
+	mux.HandleFunc("/api/messages", s.handleMessages) // Add this line
 
 	// Static files (embedded)
 	mux.HandleFunc("/", s.handleStatic)
@@ -825,4 +831,190 @@ func extractPrologCode(response string) string {
 	}
 
 	return strings.TrimSpace(response[start : start+end])
+}
+
+type SimulationResult struct {
+	ByType   map[string]int64  `json:"byType"`
+	BySrc    map[string]int64  `json:"bySrc"`
+	ByDst    map[string]int64  `json:"byDst"`
+	Timeline []SimulationEvent `json:"timeline"`
+	Total    int64             `json:"total"`
+	Steps    int               `json:"steps"`
+}
+
+type SimulationEvent struct {
+	Step  int    `json:"step"`
+	Label string `json:"label"`
+	From  string `json:"from"`
+	To    string `json:"to"`
+}
+
+// handleSimulate runs a simulation of the state machine
+func (s *Server) handleSimulate(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	stepsParam := r.URL.Query().Get("steps")
+	steps := 1000
+	if stepsParam != "" {
+		if n, err := strconv.Atoi(stepsParam); err == nil && n > 0 && n <= 10000 {
+			steps = n
+		}
+	}
+
+	result := SimulationResult{
+		ByType:   make(map[string]int64),
+		BySrc:    make(map[string]int64),
+		ByDst:    make(map[string]int64),
+		Timeline: make([]SimulationEvent, 0),
+		Total:    0,
+		Steps:    steps,
+	}
+
+	// Use GetStateMachine which properly extracts bindings
+	sm, err := s.engine.GetStateMachine(ctx)
+	if err != nil || len(sm.Initial) == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(result)
+		return
+	}
+
+	// Build adjacency map
+	type trans struct{ from, label, to string }
+	adj := make(map[string][]trans)
+	for _, tr := range sm.Transitions {
+		adj[tr.From] = append(adj[tr.From], trans{tr.From, tr.Label, tr.To})
+	}
+
+	// Helper to extract actor from state name (e.g., "proposer_idle" -> "proposer")
+	extractActor := func(state string) string {
+		idx := strings.Index(state, "_")
+		if idx > 0 {
+			return state[:idx]
+		}
+		return state
+	}
+
+	// Run simulation - walk the state machine
+	current := sm.Initial[rand.Intn(len(sm.Initial))]
+
+	// Sample interval for timeline
+	sampleInterval := steps / 100
+	if sampleInterval < 1 {
+		sampleInterval = 1
+	}
+
+	for step := 0; step < steps; step++ {
+		outgoing := adj[current]
+		if len(outgoing) == 0 {
+			// Dead end - restart from random initial
+			current = sm.Initial[rand.Intn(len(sm.Initial))]
+			continue
+		}
+
+		// Pick random transition
+		tr := outgoing[rand.Intn(len(outgoing))]
+
+		// Record this as a "message" event
+		fromActor := extractActor(tr.from)
+		toActor := extractActor(tr.to)
+
+		result.ByType[tr.label]++
+		result.BySrc[fromActor]++
+		result.ByDst[toActor]++
+		result.Total++
+
+		// Sample timeline
+		if step%sampleInterval == 0 {
+			result.Timeline = append(result.Timeline, SimulationEvent{
+				Step:  step,
+				Label: tr.label,
+				From:  fromActor,
+				To:    toActor,
+			})
+		}
+
+		current = tr.to
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+type MessageStats struct {
+	ByType   map[string]int64 `json:"byType"`
+	BySrc    map[string]int64 `json:"bySrc"`
+	ByDst    map[string]int64 `json:"byDst"`
+	Timeline []MessagePoint   `json:"timeline"`
+	Total    int64            `json:"total"`
+}
+
+type MessagePoint struct {
+	Seq   int    `json:"seq"`
+	Src   string `json:"src"`
+	Dst   string `json:"dst"`
+	Label string `json:"label"`
+}
+
+// handleMessages provides statistics about messages in the system
+func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	result := MessageStats{
+		ByType:   make(map[string]int64),
+		BySrc:    make(map[string]int64),
+		ByDst:    make(map[string]int64),
+		Timeline: make([]MessagePoint, 0),
+		Total:    0,
+	}
+
+	// Query all messages: message(Seq, From, To, Label)
+	msgResults, _ := s.engine.Query(ctx, "message(Seq, From, To, Label).")
+
+	type msg struct {
+		seq   int
+		from  string
+		to    string
+		label string
+	}
+	var messages []msg
+
+	for _, row := range msgResults {
+		seqStr := row["Seq"]
+		seq := 0
+		if seqStr != "" {
+			seq, _ = strconv.Atoi(seqStr)
+		}
+
+		from := row["From"]
+		to := row["To"]
+		label := row["Label"]
+
+		if from != "" && to != "" && label != "" {
+			messages = append(messages, msg{seq, from, to, label})
+		}
+	}
+
+	// Sort by sequence number
+	sort.Slice(messages, func(i, j int) bool {
+		return messages[i].seq < messages[j].seq
+	})
+
+	// Build stats
+	for _, m := range messages {
+		result.ByType[m.label]++
+		result.BySrc[m.from]++
+		result.ByDst[m.to]++
+		result.Timeline = append(result.Timeline, MessagePoint{
+			Seq:   m.seq,
+			Src:   m.from,
+			Dst:   m.to,
+			Label: m.label,
+		})
+		result.Total++
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
 }
