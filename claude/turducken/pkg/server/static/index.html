@@ -417,6 +417,7 @@
                     <button class="tab active" onclick="switchTab('viz')">📊 Visualize</button>
                     <button class="tab" onclick="switchTab('docs')">📖 Docs</button>
                     <button class="tab" onclick="switchTab('spec')">📝 Prolog</button>
+                    <button class="tab" onclick="switchTab('prompt')">🧭 Sys Prompt</button>
                     <button class="tab" onclick="switchTab('query')">🔍 Query</button>
                     <button class="tab" onclick="switchTab('check')">✓ Check</button>
                 </div>
@@ -464,6 +465,16 @@ transition(busy, done, idle).
                             <button class="btn btn-secondary example-btn" onclick="loadExample('sequence')">Sequence</button>
                             <button class="btn btn-secondary example-btn" onclick="loadExample('bread_company')">Bread Company</button>
                         </div>
+                    </div>
+                </div>
+                
+                <!-- System Prompt Tab -->
+                <div id="tab-prompt" class="tab-content">
+                    <div class="panel-body" style="overflow-y: auto; min-height: 0; flex: 1;">
+                        <h4 style="margin: 0 0 8px 0; color: var(--text-secondary);">System Prompt</h4>
+                        <pre id="systemPromptText" style="white-space: pre-wrap; margin: 0 0 16px 0; color: var(--text-primary);"></pre>
+                        <h4 style="margin: 0 0 8px 0; color: var(--text-secondary);">User Prompt (preview)</h4>
+                        <pre id="userPromptText" style="white-space: pre-wrap; margin: 0; color: var(--text-primary);"></pre>
                     </div>
                 </div>
                 
@@ -563,6 +574,10 @@ transition(busy, done, idle).
             
             document.querySelector(`[onclick="switchTab('${tabName}')"]`).classList.add('active');
             document.getElementById(`tab-${tabName}`).classList.add('active');
+            
+            if (tabName === 'prompt') {
+                loadPromptPreview();
+            }
         }
         
         // API calls
@@ -581,6 +596,7 @@ transition(busy, done, idle).
                     setStatus('Spec applied successfully!', 'success');
                     loadProperties();
                     loadDocs();  // Add this line
+                    loadPromptPreview();
                 } else {
                     setStatus(`Spec error: ${data.error}`, 'error');
                     console.error('Prolog error:', data.error);
@@ -1169,32 +1185,50 @@ transition(busy, done, idle).
                 property(liveness, 'Can always send again', 'ag(ef(atom(can_send)))').`,
                 
             sequence: `% Request-Response Protocol
-                lifeline(client).
-                lifeline(server).
-                lifeline(database).
+                channel(client_server, 1).
+                channel(server_db, 1).
                 
-                message(1, client, server, request).
-                message(2, server, database, query).
-                message(3, database, server, result).
-                message(4, server, client, response).
+                send(client_server, request, client_idle, client_waiting).
+                recv(client_server, request, server_idle, server_requesting).
                 
-                state(idle, [ready]).
-                state(requesting, [busy]).
-                state(querying, [busy]).
-                state(responding, [busy]).
+                send(server_db, query, server_requesting, server_querying).
+                recv(server_db, query, database_idle, database_querying).
                 
-                initial(idle).
-                accepting(idle).
+                send(server_db, result, database_querying, database_idle).
+                recv(server_db, result, server_querying, server_responding).
                 
-                transition(idle, request, requesting).
-                transition(requesting, query, querying).
-                transition(querying, result, responding);
-                transition(responding, response, idle).
+                send(client_server, response, server_responding, server_idle).
+                recv(client_server, response, client_waiting, client_idle).
                 
-                prop(idle, ready).
-                prop(requesting, busy).
-                prop(querying, busy).
-                prop(responding, busy).
+                actor(client).
+                actor(server).
+                actor(database).
+                
+                actor_initial(client, client_idle).
+                actor_initial(server, server_idle).
+                actor_initial(database, database_idle).
+                
+                actor_state(client, client_idle, [ready]).
+                actor_state(client, client_waiting, [busy]).
+                actor_state(server, server_idle, [ready]).
+                actor_state(server, server_requesting, [busy]).
+                actor_state(server, server_querying, [busy]).
+                actor_state(server, server_responding, [busy]).
+                actor_state(database, database_idle, [ready]).
+                actor_state(database, database_querying, [busy]).
+                
+                actor_transition(client, client_idle, request, client_waiting).
+                actor_transition(client, client_waiting, response, client_idle).
+                actor_transition(server, server_idle, request, server_requesting).
+                actor_transition(server, server_requesting, query, server_querying).
+                actor_transition(server, server_querying, result, server_responding).
+                actor_transition(server, server_responding, response, server_idle).
+                actor_transition(database, database_idle, query, database_querying).
+                actor_transition(database, database_querying, result, database_idle).
+                
+                prop(State, Prop) :- actor_state(_, State, Props), member(Prop, Props).
+                initial(S) :- actor_initial(_, S).
+                transition(From, Label, To) :- actor_transition(_, From, Label, To).
                 
                 property(completes, 'Requests complete', 'ag(or(not(atom(busy)), af(atom(ready))))').`
                 ,
@@ -1340,30 +1374,46 @@ transition(busy, done, idle).
                 msg_annotation(checkout, send, accounting).
                 msg_annotation(moved_to_charity, send, charity).
                 
-                lifeline(factory).
-                lifeline(bakers).
-                lifeline(truck).
-                lifeline(storefront).
-                lifeline(customers).
-                lifeline(charity).
-                lifeline(accounting).
+                channel(factory_bakers, 1).
+                channel(factory_truck, 1).
+                channel(truck_store, 1).
+                channel(store_customers, 1).
+                channel(store_accounting, 1).
+                channel(store_charity, 1).
                 
-                message(1, factory, bakers, start_day).
-                message(2, bakers, factory, mixed).
-                message(3, bakers, factory, kneaded).
-                message(4, bakers, factory, baked).
-                message(5, bakers, factory, cooled).
-                message(6, factory, truck, bagged).
-                message(7, truck, storefront, deliver_bread).
-                message(8, storefront, truck, receive_delivery).
-                message(9, storefront, storefront, stock_fresh_rack).
-                message(10, customers, storefront, arrive).
-                message(11, storefront, customers, offer_bread).
-                message(12, customers, storefront, purchase_8).
-                message(13, storefront, accounting, record_sale).
-                message(14, storefront, charity, move_old_stock).
-                message(15, charity, storefront, pickup_confirm).
-                message(16, accounting, storefront, revenue_ok).
+                send(factory_bakers, start_day, factory_idle, factory_chance_batch).
+                recv(factory_bakers, start_day, bakers_idle, bakers_running_mixer).
+                send(factory_bakers, mixed, bakers_running_mixer, bakers_kneading).
+                recv(factory_bakers, mixed, factory_mixing, factory_kneading).
+                send(factory_bakers, kneaded, bakers_kneading, bakers_loading_oven).
+                recv(factory_bakers, kneaded, factory_kneading, factory_baking).
+                send(factory_bakers, baked, bakers_loading_oven, bakers_unloading_oven).
+                recv(factory_bakers, baked, factory_baking, factory_cooling).
+                send(factory_bakers, cooled, bakers_unloading_oven, bakers_idle).
+                recv(factory_bakers, cooled, factory_cooling, factory_bagging).
+                
+                send(factory_truck, bagged, factory_bagging, factory_waiting_truck).
+                recv(factory_truck, bagged, truck_idle, truck_loading).
+                send(factory_truck, loaded_truck, truck_loading, truck_in_transit).
+                recv(factory_truck, loaded_truck, factory_waiting_truck, factory_idle).
+                
+                send(truck_store, deliver_bread, truck_in_transit, truck_unloading).
+                recv(truck_store, deliver_bread, store_open, store_stocking).
+                send(truck_store, receive_delivery, store_stocking, store_fresh_rack_full).
+                recv(truck_store, receive_delivery, truck_unloading, truck_idle).
+                
+                send(store_customers, arrive, customers_idle, customers_arriving_low).
+                recv(store_customers, arrive, store_open, store_open).
+                send(store_customers, offer_bread, store_fresh_rack_full, store_fresh_rack_low).
+                recv(store_customers, offer_bread, customers_arriving_low, customers_buying).
+                send(store_customers, purchase_8, customers_buying, customers_idle).
+                recv(store_customers, purchase_8, store_fresh_rack_low, store_fresh_rack_low).
+                
+                send(store_accounting, record_sale, store_fresh_rack_low, store_fresh_rack_low).
+                recv(store_accounting, record_sale, accounting_loss, accounting_revenue).
+                
+                send(store_charity, move_old_stock, store_rotating_stock, store_charity_rack).
+                recv(store_charity, move_old_stock, charity_idle, charity_receiving).
                 
                 prop(State, Prop) :- actor_state(_, State, Props), member(Prop, Props).
                 initial(S) :- actor_initial(_, S).
@@ -1669,6 +1719,38 @@ transition(busy, done, idle).
             }
         }
         
+        async function loadPromptPreview() {
+            try {
+                const [promptResp, specResp] = await Promise.all([
+                    fetch('/api/system-prompt'),
+                    fetch('/api/spec')
+                ]);
+                const promptData = await promptResp.json();
+                const specData = await specResp.json();
+                
+                const systemPrompt = document.getElementById('systemPromptText');
+                const userPrompt = document.getElementById('userPromptText');
+                const editorValue = document.getElementById('specEditor')?.value || '';
+                const chatValue = document.getElementById('chatInput')?.value.trim() || '<your message>';
+                
+                systemPrompt.textContent = promptData.success ? promptData.prompt : 'No system prompt available.';
+                
+                let preview = '';
+                const currentSpec = specData && specData.source ? specData.source : '';
+                if (currentSpec) {
+                    preview += 'Current specification:\n```prolog\n' + currentSpec + '\n```\n\n';
+                }
+                if (editorValue) {
+                    preview += 'Context:\n' + editorValue + '\n\n';
+                }
+                preview += 'User request:\n' + chatValue;
+                
+                userPrompt.textContent = preview;
+            } catch (err) {
+                console.error('Error loading prompt preview:', err);
+            }
+        }
+        
         // Update applySpec to also load docs
         async function applySpec() {
             const source = document.getElementById('specEditor').value;
@@ -1697,6 +1779,7 @@ transition(busy, done, idle).
         // Add after loadProperties() call:
         loadProperties();
         loadDocs();
+        loadPromptPreview();
     </script>
 </body>
 </html>

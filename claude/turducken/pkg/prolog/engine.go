@@ -184,8 +184,8 @@ all_accepting(States) :-
     findall(S, accepting(S), States).
 
 % --- Interaction Diagram (Sequence) ---
-% message(Seq, From, To, Label) - message in sequence diagram
-% lifeline(Actor) - participant in sequence
+% message(Seq, From, To, Label) - legacy explicit message (prefer send/recv)
+% lifeline(Actor) - participant in sequence (optional)
 
 all_lifelines(Lifelines) :-
     findall(L, lifeline(L), Lifelines).

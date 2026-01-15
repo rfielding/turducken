@@ -83,6 +83,13 @@ State Machines:
   state_guard(state, guard_name).  % Optional guard for state
   transition_guard(from, label, to, guard_name). % Optional guard for transition
 
+State/Actor Semantics:
+  - Every state belongs to an actor. Use actor/1 or actor/2 plus actor_state/3 and actor_transition/4.
+  - A state name is a guard label: after a transition edits actor variables, all matching states are considered.
+  - Channel constraints apply: do not send on full channels or recv on empty channels.
+  - For simulation only, a dice roll is made BEFORE selecting among matching states.
+  - Use dice0(Low, High) inside guards to control probability of which next state is chosen.
+
 CSP Channels:
   channel(name, capacity).         % Declare buffered channel
   send(chan, msg, s1, s2).        % Send transition
@@ -104,8 +111,7 @@ CTL Properties:
   %          eu(F1,F2), au(F1,F2)
 
 Sequence Diagrams:
-  lifeline(actor).                 % Declare participant
-  message(seq, from, to, label).   % Message at sequence number
+  Derived from channels (send/recv) and state machine annotations.
 
 Charts:
   pie_slice(label, value).         % Pie chart slice
@@ -118,6 +124,10 @@ Guards and Chance:
   Example:
     low_roll :- dice0(0.0, 0.3).
     high_roll :- dice0(0.3, 1.0).
+
+Sequence Derivation:
+  Do NOT emit message/4 facts unless explicitly requested.
+  Sequence diagrams are derived from the state machine, channels, and annotations.
 
 When the user describes a system, generate clean Prolog code enclosed in ` + "```prolog" + ` blocks.
 Focus on capturing the essential behavior and properties they care about.`
@@ -294,12 +304,12 @@ prop(done, complete).
 % CTL property: from idle, we can eventually reach done
 % check_ctl(ef(atom(complete))).
 
-% Sequence diagram for the protocol
-lifeline(client).
-lifeline(server).
-
-message(1, client, server, request).
-message(2, server, client, response).
+% Sequence diagram derived from channels
+channel(client_server, 1).
+send(client_server, request, client_idle, client_waiting).
+recv(client_server, request, server_idle, server_busy).
+send(client_server, response, server_busy, server_idle).
+recv(client_server, response, client_waiting, client_idle).
 ` + "```" + `
 
 To use this specification:

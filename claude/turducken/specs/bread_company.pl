@@ -151,31 +151,47 @@ msg_annotation(sell_bread, recv, customers).
 msg_annotation(checkout, send, accounting).
 msg_annotation(moved_to_charity, send, charity).
 
-% === SEQUENCE DIAGRAM ===
-lifeline(factory).
-lifeline(bakers).
-lifeline(truck).
-lifeline(storefront).
-lifeline(customers).
-lifeline(charity).
-lifeline(accounting).
+% === CHANNELS AND MESSAGE FLOW (for sequence derivation) ===
+channel(factory_bakers, 1).
+channel(factory_truck, 1).
+channel(truck_store, 1).
+channel(store_customers, 1).
+channel(store_accounting, 1).
+channel(store_charity, 1).
 
-message(1, factory, bakers, start_day).
-message(2, bakers, factory, mixed).
-message(3, bakers, factory, kneaded).
-message(4, bakers, factory, baked).
-message(5, bakers, factory, cooled).
-message(6, factory, truck, bagged).
-message(7, truck, storefront, deliver_bread).
-message(8, storefront, truck, receive_delivery).
-message(9, storefront, storefront, stock_fresh_rack).
-message(10, customers, storefront, arrive).
-message(11, storefront, customers, offer_bread).
-message(12, customers, storefront, purchase_8).
-message(13, storefront, accounting, record_sale).
-message(14, storefront, charity, move_old_stock).
-message(15, charity, storefront, pickup_confirm).
-message(16, accounting, storefront, revenue_ok).
+send(factory_bakers, start_day, factory_idle, factory_chance_batch).
+recv(factory_bakers, start_day, bakers_idle, bakers_running_mixer).
+send(factory_bakers, mixed, bakers_running_mixer, bakers_kneading).
+recv(factory_bakers, mixed, factory_mixing, factory_kneading).
+send(factory_bakers, kneaded, bakers_kneading, bakers_loading_oven).
+recv(factory_bakers, kneaded, factory_kneading, factory_baking).
+send(factory_bakers, baked, bakers_loading_oven, bakers_unloading_oven).
+recv(factory_bakers, baked, factory_baking, factory_cooling).
+send(factory_bakers, cooled, bakers_unloading_oven, bakers_idle).
+recv(factory_bakers, cooled, factory_cooling, factory_bagging).
+
+send(factory_truck, bagged, factory_bagging, factory_waiting_truck).
+recv(factory_truck, bagged, truck_idle, truck_loading).
+send(factory_truck, loaded_truck, truck_loading, truck_in_transit).
+recv(factory_truck, loaded_truck, factory_waiting_truck, factory_idle).
+
+send(truck_store, deliver_bread, truck_in_transit, truck_unloading).
+recv(truck_store, deliver_bread, store_open, store_stocking).
+send(truck_store, receive_delivery, store_stocking, store_fresh_rack_full).
+recv(truck_store, receive_delivery, truck_unloading, truck_idle).
+
+send(store_customers, arrive, customers_idle, customers_arriving_low).
+recv(store_customers, arrive, store_open, store_open).
+send(store_customers, offer_bread, store_fresh_rack_full, store_fresh_rack_low).
+recv(store_customers, offer_bread, customers_arriving_low, customers_buying).
+send(store_customers, purchase_8, customers_buying, customers_idle).
+recv(store_customers, purchase_8, store_fresh_rack_low, store_fresh_rack_low).
+
+send(store_accounting, record_sale, store_fresh_rack_low, store_fresh_rack_low).
+recv(store_accounting, record_sale, accounting_loss, accounting_revenue).
+
+send(store_charity, move_old_stock, store_rotating_stock, store_charity_rack).
+recv(store_charity, move_old_stock, charity_idle, charity_receiving).
 
 % === DERIVED PREDICATES ===
 prop(State, Prop) :- actor_state(_, State, Props), member(Prop, Props).

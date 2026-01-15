@@ -124,6 +124,7 @@ func (s *Server) ListenAndServe(addr string) error {
 	mux.HandleFunc("/api/properties", s.handleProperties)
 	mux.HandleFunc("/api/docs", s.handleDocs)
 	mux.HandleFunc("/api/actors", s.handleActors)
+	mux.HandleFunc("/api/system-prompt", s.handleSystemPrompt)
 	mux.HandleFunc("/api/metrics", s.handleMetrics)
 	mux.HandleFunc("/api/openapi", s.handleOpenAPI)
 	mux.HandleFunc("/api/simulate", s.handleSimulate) // Add this line
@@ -642,6 +643,15 @@ func (s *Server) handleActors(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"actors":  actors,
+	})
+}
+
+func (s *Server) handleSystemPrompt(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"prompt":  llm.SystemPrompt,
 	})
 }
 

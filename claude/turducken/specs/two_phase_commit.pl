@@ -4,36 +4,52 @@
 % This specification models a simplified two-phase commit protocol
 % between a coordinator and two participants.
 
-% --- State Machine ---
-state(init, [ready]).
-state(preparing, []).
-state(prepared, [can_commit]).
-state(committed, [done]).
-state(aborted, [done]).
+% --- State Machine (per actor) ---
+actor(coordinator).
+actor(participant1).
+actor(participant2).
 
-initial(init).
-accepting(committed).
-accepting(aborted).
+actor_initial(coordinator, coord_init).
+actor_initial(participant1, p1_init).
+actor_initial(participant2, p2_init).
+
+actor_state(coordinator, coord_init, [ready]).
+actor_state(coordinator, coord_preparing, []).
+actor_state(coordinator, coord_prepared, [can_commit]).
+actor_state(coordinator, coord_committed, [done]).
+actor_state(coordinator, coord_aborted, [done]).
+
+actor_state(participant1, p1_init, [ready]).
+actor_state(participant1, p1_prepared, [can_commit]).
+actor_state(participant1, p1_committed, [done]).
+actor_state(participant1, p1_aborted, [done]).
+
+actor_state(participant2, p2_init, [ready]).
+actor_state(participant2, p2_prepared, [can_commit]).
+actor_state(participant2, p2_committed, [done]).
+actor_state(participant2, p2_aborted, [done]).
 
 % Phase 1: Prepare
-transition(init, prepare, preparing).
-transition(preparing, vote_yes, prepared).
-transition(preparing, vote_no, aborted).
+actor_transition(coordinator, coord_init, prepare, coord_preparing).
+actor_transition(coordinator, coord_preparing, vote_yes, coord_prepared).
+actor_transition(coordinator, coord_preparing, vote_no, coord_aborted).
 
 % Phase 2: Commit or Abort
-transition(prepared, commit, committed).
-transition(prepared, abort, aborted).
+actor_transition(coordinator, coord_prepared, commit, coord_committed).
+actor_transition(coordinator, coord_prepared, abort, coord_aborted).
+
+actor_transition(participant1, p1_init, recv_prepare, p1_prepared).
+actor_transition(participant1, p1_prepared, recv_commit, p1_committed).
+actor_transition(participant1, p1_prepared, recv_abort, p1_aborted).
+
+actor_transition(participant2, p2_init, recv_prepare, p2_prepared).
+actor_transition(participant2, p2_prepared, recv_commit, p2_committed).
+actor_transition(participant2, p2_prepared, recv_abort, p2_aborted).
 
 % Properties for CTL
-prop(init, ready).
-prop(prepared, can_commit).
-prop(committed, done).
-prop(aborted, done).
-
-% --- Actors ---
-actor(coordinator, init).
-actor(participant1, init).
-actor(participant2, init).
+prop(State, Prop) :- actor_state(_, State, Props), member(Prop, Props).
+initial(S) :- actor_initial(_, S).
+transition(From, Label, To) :- actor_transition(_, From, Label, To).
 
 % --- Channels (CSP-style) ---
 channel(coord_to_p1, 1).
@@ -41,17 +57,21 @@ channel(coord_to_p2, 1).
 channel(p1_to_coord, 1).
 channel(p2_to_coord, 1).
 
-% --- Sequence Diagram ---
-lifeline(coordinator).
-lifeline(participant1).
-lifeline(participant2).
+% --- Sequence Diagram (derived from channels) ---
+send(coord_to_p1, prepare, coord_init, coord_preparing).
+recv(coord_to_p1, prepare, p1_init, p1_prepared).
+send(coord_to_p2, prepare, coord_init, coord_preparing).
+recv(coord_to_p2, prepare, p2_init, p2_prepared).
 
-message(1, coordinator, participant1, prepare).
-message(2, coordinator, participant2, prepare).
-message(3, participant1, coordinator, vote_yes).
-message(4, participant2, coordinator, vote_yes).
-message(5, coordinator, participant1, commit).
-message(6, coordinator, participant2, commit).
+send(p1_to_coord, vote_yes, p1_prepared, p1_prepared).
+recv(p1_to_coord, vote_yes, coord_preparing, coord_prepared).
+send(p2_to_coord, vote_yes, p2_prepared, p2_prepared).
+recv(p2_to_coord, vote_yes, coord_preparing, coord_prepared).
+
+send(coord_to_p1, commit, coord_prepared, coord_committed).
+recv(coord_to_p1, commit, p1_prepared, p1_committed).
+send(coord_to_p2, commit, coord_prepared, coord_committed).
+recv(coord_to_p2, commit, p2_prepared, p2_committed).
 
 % --- Process Definitions (Recursive Equations) ---
 % Coordinator process

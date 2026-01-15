@@ -102,10 +102,7 @@ proc(Name, Definition).
 
 ### Sequence Diagrams
 
-```prolog
-lifeline(actor).                 % Declare participant
-message(seq, from, to, label).   % Message at sequence number
-```
+Sequence views are derived from channel usage (`send/4`, `recv/4`) and annotations.
 
 ### Charts
 
