@@ -713,15 +713,15 @@ transition(busy, done, idle).
                 const data = await resp.json();
                 
                 if (data.success) {
-                    const unicodeFormula = toUnicodeLogic(property);
-                    const unicodeLine = (unicodeFormula && unicodeFormula !== property)
-                        ? `<div style="font-size: 0.85rem; color: var(--text-primary); margin-top: 6px; font-family: monospace;">${escapeHtml(unicodeFormula)}</div>`
+                    const ctlMath = ctlToMath(property);
+                    const mathLine = (ctlMath && ctlMath !== property)
+                        ? `<div style="font-size: 0.85rem; color: var(--text-primary); margin-top: 6px; font-family: monospace;">${escapeHtml(ctlMath)}</div>`
                         : '';
                     resultDiv.innerHTML = `<div class="check-result ${data.satisfied ? 'satisfied' : 'unsatisfied'}">
                         ${data.satisfied ? '✓ Property SATISFIED' : '✗ Property NOT satisfied'}
                     </div>
                     <div style="font-size: 0.85rem; color: var(--accent-purple); margin-top: 6px; font-family: monospace;">${escapeHtml(property)}</div>
-                    ${unicodeLine}`;
+                    ${mathLine}`;
                 } else {
                     resultDiv.innerHTML = `<div class="check-result unsatisfied">Error: ${data.error}</div>`;
                 }
@@ -1823,6 +1823,103 @@ transition(busy, done, idle).
                 .replace(/\/\\/g, '∧')
                 .replace(/\\\//g, '∨');
         }
+
+        function ctlToMath(text) {
+            if (!text) {
+                return '';
+            }
+
+            const tokens = [];
+            const re = /[A-Za-z_][A-Za-z0-9_]*|->|[(),]/g;
+            let match;
+            while ((match = re.exec(text)) !== null) {
+                tokens.push(match[0]);
+            }
+
+            let idx = 0;
+            const peek = () => tokens[idx];
+            const next = () => tokens[idx++];
+            const hasNext = () => idx < tokens.length;
+
+            const wrap = (s) => {
+                if (!s) return s;
+                if (/[ \t∧∨→]/.test(s) || s.includes(' U ') || s.startsWith('¬')) {
+                    return `(${s})`;
+                }
+                return s;
+            };
+
+            const parseExpr = () => {
+                const tok = peek();
+                if (!tok) {
+                    return '';
+                }
+                if (/^[A-Za-z_]/.test(tok)) {
+                    const ident = next();
+                    if (peek() === '(') {
+                        next(); // (
+                        const args = [];
+                        if (peek() !== ')') {
+                            while (hasNext()) {
+                                args.push(parseExpr());
+                                if (peek() === ',') {
+                                    next();
+                                    continue;
+                                }
+                                break;
+                            }
+                        }
+                        if (peek() === ')') {
+                            next();
+                        }
+                        return renderFunc(ident, args);
+                    }
+                    return ident;
+                }
+                return next();
+            };
+
+            const renderFunc = (ident, args) => {
+                switch (ident) {
+                case 'atom':
+                    return args[0] || '';
+                case 'not':
+                    return `¬${wrap(args[0] || '')}`;
+                case 'and':
+                    return `(${wrap(args[0])} ∧ ${wrap(args[1])})`;
+                case 'or':
+                    return `(${wrap(args[0])} ∨ ${wrap(args[1])})`;
+                case 'ex':
+                    return `∃X(${args[0] || ''})`;
+                case 'ax':
+                    return `∀X(${args[0] || ''})`;
+                case 'ef':
+                    return `∃F(${args[0] || ''})`;
+                case 'af':
+                    return `∀F(${args[0] || ''})`;
+                case 'eg':
+                    return `∃G(${args[0] || ''})`;
+                case 'ag':
+                    return `∀G(${args[0] || ''})`;
+                case 'eu':
+                    return `∃(${args[0] || ''} U ${args[1] || ''})`;
+                case 'au':
+                    return `∀(${args[0] || ''} U ${args[1] || ''})`;
+                default:
+                    return `${ident}(${args.join(', ')})`;
+                }
+            };
+
+            try {
+                const parsed = parseExpr();
+                if (!parsed) {
+                    return toUnicodeLogic(text);
+                }
+                return toUnicodeLogic(parsed);
+            } catch (_err) {
+                return toUnicodeLogic(text);
+            }
+        }
         
         const MAX_AUTO_FIX_RETRIES = 3;
         
@@ -1848,9 +1945,9 @@ transition(busy, done, idle).
                         }
                         
                         const formula = p.formula || '';
-                        const unicodeFormula = toUnicodeLogic(formula);
-                        const unicodeLine = (unicodeFormula && unicodeFormula !== formula)
-                            ? `<div style="font-size: 0.8rem; color: var(--text-primary); margin-left: 28px; font-family: monospace;">${escapeHtml(unicodeFormula)}</div>`
+                        const ctlMath = ctlToMath(formula);
+                        const mathLine = (ctlMath && ctlMath !== formula)
+                            ? `<div style="font-size: 0.8rem; color: var(--text-primary); margin-left: 28px; font-family: monospace;">${escapeHtml(ctlMath)}</div>`
                             : '';
 
                         return `
@@ -1861,7 +1958,7 @@ transition(busy, done, idle).
                             </div>
                             <div style="font-size: 0.85rem; color: var(--text-secondary); margin-left: 28px;">${p.description}</div>
                             <div style="font-size: 0.8rem; color: var(--accent-purple); margin-left: 28px; font-family: monospace;">${escapeHtml(formula)}</div>
-                            ${unicodeLine}
+                            ${mathLine}
                             ${p.error ? `<div style="font-size: 0.8rem; color: var(--accent-red); margin-left: 28px;">Error: ${p.error}</div>` : ''}
                         </div>
                     `}).join('');
