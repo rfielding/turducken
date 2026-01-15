@@ -93,21 +93,3 @@ property(progress, 'Can always eventually reach consensus', 'ag(ef(atom(consensu
 property(acceptor_safety, 'Acceptor must promise before accepting', 'ag(or(not(atom(has_accepted)), atom(has_promise)))').
 property(preemption_recovery, 'Preempted proposer can retry', 'ag(or(not(atom(higher_ballot_seen)), ef(atom(can_propose))))').
 
-% === SEQUENCE DIAGRAM: Successful Paxos Round ===
-lifeline(proposer1).
-lifeline(acceptor1).
-lifeline(acceptor2).
-lifeline(acceptor3).
-
-message(1, proposer1, acceptor1, prepare_n).
-message(2, proposer1, acceptor2, prepare_n).
-message(3, proposer1, acceptor3, prepare_n).
-message(4, acceptor1, proposer1, promise_n).
-message(5, acceptor2, proposer1, promise_n).
-message(6, acceptor3, proposer1, promise_n).
-message(7, proposer1, acceptor1, accept_n_v).
-message(8, proposer1, acceptor2, accept_n_v).
-message(9, proposer1, acceptor3, accept_n_v).
-message(10, acceptor1, proposer1, accepted_n_v).
-message(11, acceptor2, proposer1, accepted_n_v).
-message(12, acceptor3, proposer1, accepted_n_v).

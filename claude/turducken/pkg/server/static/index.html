@@ -807,22 +807,45 @@ transition(busy, done, idle).
                             return;
                         }
                         
+                        const maxPoints = 200;
+                        let sampledX = xValues;
+                        let sampledSeries = cumulativeByType;
+                        
+                        if (xValues.length > maxPoints) {
+                            const stride = Math.ceil(xValues.length / maxPoints);
+                            const sampleIdx = [];
+                            for (let i = 0; i < xValues.length; i += stride) {
+                                sampleIdx.push(i);
+                            }
+                            
+                            sampledX = sampleIdx.map(i => xValues[i]);
+                            sampledSeries = new Map();
+                            for (const [t, values] of cumulativeByType) {
+                                sampledSeries.set(t, sampleIdx.map(i => values[i]));
+                            }
+                        }
+                        
                         const maxY = Math.max(...Object.values(runningCounts)) + 2;
-                        const xAxis = xValues.map(x => `"${x}"`).join(', ');
+                        const xAxis = sampledX.map(x => `"${x}"`).join(', ');
                         
                         let code = `xychart-beta
     title "Transitions Over Simulation"
     x-axis "Step" [${xAxis}]
     y-axis "Count" 0 --> ${maxY}`;
                         
-                        for (const [t, values] of cumulativeByType) {
+                        for (const [t, values] of sampledSeries) {
                             code += `\n    line [${values.join(', ')}]`;
                         }
                         
-                        const series = Array.from(cumulativeByType.keys()).map(name => ({ name }));
+                        const series = Array.from(sampledSeries.keys()).map(name => ({ name }));
                         const legendHtml = generateLineLegend({ series });
                         output.innerHTML = `<pre class="mermaid">${code}</pre>${legendHtml}`;
-                        await mermaid.run();
+                        try {
+                            await mermaid.run();
+                        } catch (mermaidErr) {
+                            console.error('Mermaid error:', mermaidErr);
+                            output.innerHTML = `<div style="color: var(--accent-red);">Mermaid syntax error</div><pre style="color: var(--text-secondary); font-size: 0.8rem;">${code}</pre>`;
+                        }
                         return;
                     }
                 }
@@ -832,6 +855,7 @@ transition(busy, done, idle).
                 const data = await resp.json();
                 
                 let mermaidCode = '';
+                let noDataMessage = '';
                 
                 switch (type) {
                     case 'statemachine':
@@ -847,6 +871,9 @@ transition(busy, done, idle).
                         break;
                     case 'sequence':
                         mermaidCode = generateSequenceMermaid(data.sequence);
+                        if (!mermaidCode) {
+                            noDataMessage = 'No sequence messages found. Add lifeline/1 and message/4 facts to your spec.';
+                        }
                         break;
                 }
                 
@@ -859,7 +886,7 @@ transition(busy, done, idle).
                         output.innerHTML = `<div style="color: var(--accent-red);">Mermaid syntax error</div><pre style="color: var(--text-secondary); font-size: 0.8rem;">${mermaidCode}</pre>`;
                     }
                 } else {
-                    output.innerHTML = '<div style="color: var(--text-secondary);">No data to visualize. Load a specification first.</div>';
+                    output.innerHTML = `<div style="color: var(--text-secondary);">${noDataMessage || 'No data to visualize. Load a specification first.'}</div>`;
                 }
             } catch (err) {
                 output.innerHTML = `<div style="color: var(--accent-red);">Error: ${err.message}</div>`;
