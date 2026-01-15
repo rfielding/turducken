@@ -1034,6 +1034,12 @@ func formatFloat(value float64) string {
 func (s *Server) handleSimulate(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
+	if stepsParam := r.URL.Query().Get("steps"); stepsParam != "" {
+		if steps, err := strconv.Atoi(stepsParam); err == nil && steps > 0 {
+			s.runAndCacheSimulation(steps)
+		}
+	}
+
 	s.mu.RLock()
 	result := s.cachedSimulation
 	s.mu.RUnlock()

@@ -442,6 +442,11 @@
                 <!-- Simulation Tab -->
                 <div id="tab-simulation" class="tab-content">
                     <div class="panel-body">
+                        <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap;">
+                            <label for="simulationSteps" style="color: var(--text-secondary); font-size: 0.85rem;">Steps</label>
+                            <input type="number" id="simulationSteps" value="1000" min="1" style="width: 120px;">
+                            <button class="btn btn-secondary" onclick="renderSimulation()">Run Simulation</button>
+                        </div>
                         <div class="viz-section">
                             <h4 style="margin: 0 0 8px 0; color: var(--text-primary);">Line Chart</h4>
                             <div id="simulationLineOutput" class="mermaid-output">
@@ -814,8 +819,109 @@ transition(busy, done, idle).
         }
 
         async function renderSimulation() {
-            await visualize('line', 'simulationLineOutput');
-            await visualize('pie', 'simulationPieOutput');
+            const lineOutput = document.getElementById('simulationLineOutput');
+            const pieOutput = document.getElementById('simulationPieOutput');
+            const stepsInput = document.getElementById('simulationSteps');
+            const steps = parseInt(stepsInput?.value || '1000', 10);
+            const safeSteps = Number.isFinite(steps) && steps > 0 ? steps : 1000;
+            if (stepsInput) {
+                stepsInput.value = safeSteps;
+            }
+
+            if (lineOutput) {
+                lineOutput.innerHTML = '<div class="loading"></div>';
+            }
+            if (pieOutput) {
+                pieOutput.innerHTML = '<div class="loading"></div>';
+            }
+
+            try {
+                const resp = await fetch(`/api/simulate?steps=${safeSteps}`);
+                const data = await resp.json();
+                const events = Array.isArray(data.timeline) ? data.timeline : [];
+
+                if (!events.length) {
+                    if (lineOutput) {
+                        lineOutput.innerHTML = '<div style="color: var(--text-secondary);">No simulation events available. Load a spec first.</div>';
+                    }
+                    if (pieOutput) {
+                        pieOutput.innerHTML = '<div style="color: var(--text-secondary);">No simulation events available. Load a spec first.</div>';
+                    }
+                    return;
+                }
+
+                const extractActor = (state) => {
+                    if (!state) return 'unknown';
+                    const idx = state.indexOf('_');
+                    return idx > 0 ? state.slice(0, idx) : state;
+                };
+
+                const bySrc = (data.bySrc && Object.keys(data.bySrc).length > 0)
+                    ? data.bySrc
+                    : events.reduce((acc, evt) => {
+                        const actor = extractActor(evt.from);
+                        acc[actor] = (acc[actor] || 0) + 1;
+                        return acc;
+                    }, {});
+
+                const pieSlices = Object.entries(bySrc)
+                    .map(([label, value]) => `    "${label}" : ${value}`)
+                    .join('\n');
+                if (pieOutput) {
+                    pieOutput.innerHTML = `<pre class="mermaid">pie title Messages By Sender\n${pieSlices}</pre>`;
+                }
+
+                const ordered = events.map(evt => ({
+                    seq: (typeof evt.step === 'number' && !Number.isNaN(evt.step)) ? evt.step + 1 : 0,
+                    from: extractActor(evt.from)
+                })).sort((a, b) => a.seq - b.seq);
+
+                const senders = new Set();
+                ordered.forEach(m => senders.add(m.from));
+
+                const runningCounts = {};
+                const cumulativeBySender = new Map();
+                for (const sender of senders) {
+                    runningCounts[sender] = 0;
+                    cumulativeBySender.set(sender, []);
+                }
+
+                const xValues = [];
+                ordered.forEach(evt => {
+                    runningCounts[evt.from]++;
+                    xValues.push(evt.seq);
+                    for (const [sender, arr] of cumulativeBySender) {
+                        arr.push(runningCounts[sender]);
+                    }
+                });
+
+                const maxY = Math.max(...Object.values(runningCounts)) + 2;
+                const xAxis = xValues.map(x => `"${x}"`).join(', ');
+
+                let code = `xychart-beta
+    title "Messages Over Simulation"
+    x-axis "Step" [${xAxis}]
+    y-axis "Count" 0 --> ${maxY}`;
+
+                for (const [sender, values] of cumulativeBySender) {
+                    code += `\n    line [${values.join(', ')}]`;
+                }
+
+                if (lineOutput) {
+                    const series = Array.from(cumulativeBySender.keys()).map(name => ({ name }));
+                    const legendHtml = generateLineLegend({ series });
+                    lineOutput.innerHTML = `<pre class="mermaid">${code}</pre>${legendHtml}`;
+                }
+
+                await mermaid.run();
+            } catch (err) {
+                if (lineOutput) {
+                    lineOutput.innerHTML = `<div style="color: var(--accent-red);">Error: ${err.message}</div>`;
+                }
+                if (pieOutput) {
+                    pieOutput.innerHTML = `<div style="color: var(--accent-red);">Error: ${err.message}</div>`;
+                }
+            }
         }
 
         async function loadVizDescriptions() {
@@ -825,7 +931,11 @@ transition(busy, done, idle).
                 const docs = (data.success && data.docs) ? data.docs : [];
                 const docMap = new Map(docs.map(doc => [doc.topic, doc.content]));
                 const defaultSequence = 'An authentication system represented as CSP with checked CTL properties.';
-                const sequenceText = docMap.get('viz_sequence') || docMap.get('description') || docMap.get('overview') || defaultSequence;
+                const baseSequence = docMap.get('viz_sequence') || docMap.get('description') || docMap.get('overview') || defaultSequence;
+                const ctlSuffix = ' This is the CSP actors which can have CTL properties.';
+                const sequenceText = baseSequence.includes('CTL')
+                    ? baseSequence
+                    : `${baseSequence}${ctlSuffix}`;
                 const stateText = docMap.get('viz_statemachine') || '';
                 return { sequence: sequenceText, state: stateText };
             } catch (_err) {
@@ -1138,7 +1248,6 @@ transition(busy, done, idle).
             }
             
             let code = 'sequenceDiagram\n';
-            code += '    title Sequence\n';
             
             if (data.lifelines) {
                 data.lifelines.forEach(l => {
@@ -1148,7 +1257,10 @@ transition(busy, done, idle).
             
             if (data.messages) {
                 data.messages.forEach(m => {
-                    const label = toUnicodeLogic(m.label);
+                    let label = toUnicodeLogic(m.label);
+                    if (/^(send_|recv_)/.test(m.label)) {
+                        label = `${label}<br/>to ${m.to}`;
+                    }
                     code += `    ${m.from}->>${m.to}: ${label}\n`;
                 });
             }
