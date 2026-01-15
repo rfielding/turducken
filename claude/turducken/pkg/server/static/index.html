@@ -86,6 +86,14 @@
             gap: 20px;
             height: calc(100vh - 120px);
         }
+
+        .main-grid.chat-collapsed {
+            grid-template-columns: 1fr;
+        }
+
+        .main-grid.chat-collapsed .chat-panel {
+            display: none;
+        }
         
         @media (max-width: 1000px) {
             .main-grid {
@@ -134,6 +142,13 @@
             background: var(--bg-tertiary);
             border-bottom: 1px solid var(--border-color);
             flex-shrink: 0;
+        }
+
+        .tabs-actions {
+            margin-left: auto;
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
         
         .tab {
@@ -386,12 +401,8 @@
             margin-bottom: 4px;
         }
         
-        .viz-buttons {
-            display: flex;
-            gap: 8px;
-            margin-bottom: 12px;
-            flex-wrap: wrap;
-            flex-shrink: 0;
+        .viz-section {
+            margin-bottom: 16px;
         }
     </style>
 </head>
@@ -414,29 +425,60 @@
             <div class="panel">
                 <!-- Add new tab button in the tabs div -->
                 <div class="tabs">
-                    <button class="tab active" onclick="switchTab('viz')">📊 Visualize</button>
+                    <button class="tab active" onclick="switchTab('states')">🧭 States</button>
+                    <button class="tab" onclick="switchTab('simulation')">📈 Simulation</button>
                     <button class="tab" onclick="switchTab('docs')">📖 Docs</button>
                     <button class="tab" onclick="switchTab('spec')">📝 Prolog</button>
                     <button class="tab" onclick="switchTab('prompt')">🧭 Sys Prompt</button>
                     <button class="tab" onclick="switchTab('query')">🔍 Query</button>
                     <button class="tab" onclick="switchTab('check')">✓ Check</button>
+                    <div class="tabs-actions">
+                        <button id="chatToggleBtn" class="btn btn-secondary" onclick="toggleChat()">Hide Chat</button>
+                    </div>
                 </div>
                 
-                <!-- Visualize Tab -->
-                <div id="tab-viz" class="tab-content active">
+                <!-- States Tab -->
+                <div id="tab-states" class="tab-content active">
                     <div class="panel-body">
-                        <div class="viz-buttons">
-                            <button class="btn btn-secondary" onclick="visualize('sequence')">Sequence</button>
-                            <button class="btn btn-secondary" onclick="visualize('statemachine')">State Machine</button>
-                            <button class="btn btn-secondary" onclick="visualize('line')">Line Chart</button>
-                            <button class="btn btn-secondary" onclick="visualize('pie')">Pie Chart</button>
+                        <div class="viz-section">
+                            <h4 style="margin: 0 0 8px 0; color: var(--text-primary);">Interaction Diagram</h4>
+                            <div id="actorSummary" style="margin-bottom: 12px; padding: 10px 12px; background: var(--bg-tertiary); border-radius: 6px; border: 1px solid var(--border-color);">
+                                <div style="color: var(--text-secondary);">Load a spec to see actor descriptions.</div>
+                            </div>
+                            <div id="statesSequenceOutput" class="mermaid-output">
+                                <div style="color: var(--text-secondary); text-align: center;">
+                                    Load a spec to visualize the interaction diagram
+                                </div>
+                            </div>
                         </div>
-                        <div id="actorSummary" style="margin-bottom: 12px; padding: 10px 12px; background: var(--bg-tertiary); border-radius: 6px; border: 1px solid var(--border-color);">
-                            <div style="color: var(--text-secondary);">Load a spec to see actor descriptions.</div>
+                        <div class="viz-section">
+                            <h4 style="margin: 0 0 8px 0; color: var(--text-primary);">State Machines</h4>
+                            <div id="statesMachineOutput" class="mermaid-output">
+                                <div style="color: var(--text-secondary); text-align: center;">
+                                    Load a spec to visualize state machines
+                                </div>
+                            </div>
                         </div>
-                        <div id="vizOutput" class="mermaid-output">
-                            <div style="color: var(--text-secondary); text-align: center;">
-                                Select a visualization type above
+                    </div>
+                </div>
+
+                <!-- Simulation Tab -->
+                <div id="tab-simulation" class="tab-content">
+                    <div class="panel-body">
+                        <div class="viz-section">
+                            <h4 style="margin: 0 0 8px 0; color: var(--text-primary);">Line Chart</h4>
+                            <div id="simulationLineOutput" class="mermaid-output">
+                                <div style="color: var(--text-secondary); text-align: center;">
+                                    Load a spec to visualize line charts
+                                </div>
+                            </div>
+                        </div>
+                        <div class="viz-section">
+                            <h4 style="margin: 0 0 8px 0; color: var(--text-primary);">Pie Chart</h4>
+                            <div id="simulationPieOutput" class="mermaid-output">
+                                <div style="color: var(--text-secondary); text-align: center;">
+                                    Load a spec to visualize pie charts
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -528,7 +570,7 @@ transition(busy, done, idle).
             </div>
             
             <!-- Right Panel: Chat Only -->
-            <div class="panel">
+            <div class="panel chat-panel">
                 <div class="panel-header">
                     <span class="panel-title">💬 Chat</span>
                     <button class="btn btn-secondary" onclick="clearChat()" style="padding: 4px 12px;">Clear</button>
@@ -580,6 +622,10 @@ transition(busy, done, idle).
             
             if (tabName === 'prompt') {
                 loadPromptPreview();
+            } else if (tabName === 'states') {
+                renderStates();
+            } else if (tabName === 'simulation') {
+                renderSimulation();
             }
         }
         
@@ -600,6 +646,12 @@ transition(busy, done, idle).
                     loadProperties();
                     loadDocs();  // Add this line
                     loadPromptPreview();
+                    if (document.getElementById('tab-states').classList.contains('active')) {
+                        renderStates();
+                    }
+                    if (document.getElementById('tab-simulation').classList.contains('active')) {
+                        renderSimulation();
+                    }
                 } else {
                     setStatus(`Spec error: ${data.error}`, 'error');
                     console.error('Prolog error:', data.error);
@@ -661,9 +713,15 @@ transition(busy, done, idle).
                 const data = await resp.json();
                 
                 if (data.success) {
+                    const unicodeFormula = toUnicodeLogic(property);
+                    const unicodeLine = (unicodeFormula && unicodeFormula !== property)
+                        ? `<div style="font-size: 0.85rem; color: var(--text-primary); margin-top: 6px; font-family: monospace;">${escapeHtml(unicodeFormula)}</div>`
+                        : '';
                     resultDiv.innerHTML = `<div class="check-result ${data.satisfied ? 'satisfied' : 'unsatisfied'}">
                         ${data.satisfied ? '✓ Property SATISFIED' : '✗ Property NOT satisfied'}
-                    </div>`;
+                    </div>
+                    <div style="font-size: 0.85rem; color: var(--accent-purple); margin-top: 6px; font-family: monospace;">${escapeHtml(property)}</div>
+                    ${unicodeLine}`;
                 } else {
                     resultDiv.innerHTML = `<div class="check-result unsatisfied">Error: ${data.error}</div>`;
                 }
@@ -753,8 +811,18 @@ transition(busy, done, idle).
         
         async function applyAndVisualize() {
             await applySpec();
-            switchTab('viz');
-            visualize('sequence');
+            switchTab('states');
+            await renderStates();
+        }
+
+        function toggleChat() {
+            const grid = document.querySelector('.main-grid');
+            const button = document.getElementById('chatToggleBtn');
+            if (!grid || !button) {
+                return;
+            }
+            const collapsed = grid.classList.toggle('chat-collapsed');
+            button.textContent = collapsed ? 'Show Chat' : 'Hide Chat';
         }
         
         function clearChat() {
@@ -764,8 +832,21 @@ transition(busy, done, idle).
             </div>`;
         }
         
-        async function visualize(type) {
-            const output = document.getElementById('vizOutput');
+        async function renderStates() {
+            await visualize('sequence', 'statesSequenceOutput');
+            await visualize('statemachine', 'statesMachineOutput');
+        }
+
+        async function renderSimulation() {
+            await visualize('line', 'simulationLineOutput');
+            await visualize('pie', 'simulationPieOutput');
+        }
+
+        async function visualize(type, outputId = 'vizOutput') {
+            const output = document.getElementById(outputId);
+            if (!output) {
+                return;
+            }
             output.innerHTML = '<div class="loading"></div>';
             
             try {
@@ -1000,8 +1081,8 @@ transition(busy, done, idle).
                 });
                 
                 sm.transitions.forEach(t => {
-                    // No hardcoded annotations - just show the label
-                    code += `    ${t.from} --> ${t.to}: ${t.label}\n`;
+                    const label = toUnicodeLogic(t.label);
+                    code += `    ${t.from} --> ${t.to}: ${label}\n`;
                 });
                 
                 html += `
@@ -1039,7 +1120,8 @@ transition(busy, done, idle).
             
             if (data.transitions) {
                 data.transitions.forEach(t => {
-                    code += `    ${t.from} --> ${t.to}: ${t.label}\n`;
+                    const label = toUnicodeLogic(t.label);
+                    code += `    ${t.from} --> ${t.to}: ${label}\n`;
                 });
             }
             
@@ -1731,6 +1813,16 @@ transition(busy, done, idle).
             document.getElementById('specEditor').value = examples[name];
             switchTab('spec');
         }
+
+        function toUnicodeLogic(text) {
+            if (!text) {
+                return '';
+            }
+            return text
+                .replace(/->/g, '→')
+                .replace(/\/\\/g, '∧')
+                .replace(/\\\//g, '∨');
+        }
         
         const MAX_AUTO_FIX_RETRIES = 3;
         
@@ -1755,6 +1847,12 @@ transition(busy, done, idle).
                             statusColor = 'var(--accent-red)';
                         }
                         
+                        const formula = p.formula || '';
+                        const unicodeFormula = toUnicodeLogic(formula);
+                        const unicodeLine = (unicodeFormula && unicodeFormula !== formula)
+                            ? `<div style="font-size: 0.8rem; color: var(--text-primary); margin-left: 28px; font-family: monospace;">${escapeHtml(unicodeFormula)}</div>`
+                            : '';
+
                         return `
                         <div style="margin-bottom: 8px; padding: 8px; background: var(--bg-tertiary); border-radius: 4px;">
                             <div style="display: flex; align-items: center; gap: 8px;">
@@ -1762,7 +1860,8 @@ transition(busy, done, idle).
                                 <strong style="color: var(--accent-blue);">${p.name}</strong>
                             </div>
                             <div style="font-size: 0.85rem; color: var(--text-secondary); margin-left: 28px;">${p.description}</div>
-                            <div style="font-size: 0.8rem; color: var(--accent-purple); margin-left: 28px; font-family: monospace;">${p.formula}</div>
+                            <div style="font-size: 0.8rem; color: var(--accent-purple); margin-left: 28px; font-family: monospace;">${escapeHtml(formula)}</div>
+                            ${unicodeLine}
                             ${p.error ? `<div style="font-size: 0.8rem; color: var(--accent-red); margin-left: 28px;">Error: ${p.error}</div>` : ''}
                         </div>
                     `}).join('');
@@ -1798,7 +1897,7 @@ transition(busy, done, idle).
         loadDocs();
         
         window.addEventListener('load', () => {
-            document.getElementById('vizOutput').innerHTML = '<div style="color: var(--text-secondary);">Select a visualization type above, or load a spec first.</div>';
+            renderStates();
         });
         
         // Keyboard shortcuts
@@ -1867,7 +1966,8 @@ transition(busy, done, idle).
                 }
                 
                 actor.transitions.forEach(t => {
-                    code += `    ${t.from} --> ${t.to}: ${t.label}\n`;
+                    const label = toUnicodeLogic(t.label);
+                    code += `    ${t.from} --> ${t.to}: ${label}\n`;
                 });
             });
             
