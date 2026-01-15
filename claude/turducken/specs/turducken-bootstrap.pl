@@ -90,21 +90,23 @@ channel(http_llm, 1).
 channel(http_engine, 1).
 
 send(ui_http, post_chat, ui_idle, ui_chatting).
-recv(ui_http, post_chat, server_ready, server_handling).
 send(http_llm, send_prompt, server_handling, server_handling).
-recv(http_llm, send_prompt, llm_idle, llm_requesting).
 send(http_llm, llm_response, llm_requesting, llm_received).
-recv(http_llm, llm_response, server_handling, server_handling).
 send(ui_http, chat_response, server_handling, server_ready).
-recv(ui_http, chat_response, ui_chatting, ui_idle).
 
 send(ui_http, post_spec, ui_applying, ui_applying).
-recv(ui_http, post_spec, server_ready, server_handling).
 send(http_engine, load_spec, server_handling, server_handling).
-recv(http_engine, load_spec, engine_empty, engine_loaded).
 send(http_engine, load_result, engine_loaded, engine_loaded).
-recv(http_engine, load_result, server_handling, server_ready).
 send(ui_http, spec_status, server_ready, server_ready).
+
+recv(ui_http, post_chat, server_ready, server_handling).
+recv(http_llm, send_prompt, llm_idle, llm_requesting).
+recv(http_llm, llm_response, server_handling, server_handling).
+recv(ui_http, chat_response, ui_chatting, ui_idle).
+
+recv(ui_http, post_spec, server_ready, server_handling).
+recv(http_engine, load_spec, engine_empty, engine_loaded).
+recv(http_engine, load_result, server_handling, server_ready).
 recv(ui_http, spec_status, ui_applying, ui_idle).
 
 % ============================================================================

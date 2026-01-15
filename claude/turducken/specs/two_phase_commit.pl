@@ -59,18 +59,19 @@ channel(p2_to_coord, 1).
 
 % --- Sequence Diagram (derived from channels) ---
 send(coord_to_p1, prepare, coord_init, coord_preparing).
-recv(coord_to_p1, prepare, p1_init, p1_prepared).
 send(coord_to_p2, prepare, coord_init, coord_preparing).
-recv(coord_to_p2, prepare, p2_init, p2_prepared).
 
 send(p1_to_coord, vote_yes, p1_prepared, p1_prepared).
-recv(p1_to_coord, vote_yes, coord_preparing, coord_prepared).
 send(p2_to_coord, vote_yes, p2_prepared, p2_prepared).
-recv(p2_to_coord, vote_yes, coord_preparing, coord_prepared).
 
 send(coord_to_p1, commit, coord_prepared, coord_committed).
-recv(coord_to_p1, commit, p1_prepared, p1_committed).
 send(coord_to_p2, commit, coord_prepared, coord_committed).
+
+recv(coord_to_p1, prepare, p1_init, p1_prepared).
+recv(coord_to_p2, prepare, p2_init, p2_prepared).
+recv(p1_to_coord, vote_yes, coord_preparing, coord_prepared).
+recv(p2_to_coord, vote_yes, coord_preparing, coord_prepared).
+recv(coord_to_p1, commit, p1_prepared, p1_committed).
 recv(coord_to_p2, commit, p2_prepared, p2_committed).
 
 % --- Process Definitions (Recursive Equations) ---
