@@ -80,6 +80,8 @@ State Machines:
   initial(state).                  % Mark initial state
   accepting(state).                % Mark accepting state
   prop(state, property).           % State satisfies property
+  state_guard(state, guard_name).  % Optional guard for state
+  transition_guard(from, label, to, guard_name). % Optional guard for transition
 
 CSP Channels:
   channel(name, capacity).         % Declare buffered channel
@@ -109,6 +111,13 @@ Charts:
   pie_slice(label, value).         % Pie chart slice
   line_point(series, x, y).        % Line chart point
   bar_value(label, value).         % Bar chart value
+
+Guards and Chance:
+  Use dice0(Low, High) to slice a [0.0,1.0) roll during simulation.
+  When not simulating, dice0/2 is always true.
+  Example:
+    low_roll :- dice0(0.0, 0.3).
+    high_roll :- dice0(0.3, 1.0).
 
 When the user describes a system, generate clean Prolog code enclosed in ` + "```prolog" + ` blocks.
 Focus on capturing the essential behavior and properties they care about.`

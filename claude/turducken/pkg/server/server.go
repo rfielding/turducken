@@ -10,6 +10,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -892,13 +893,21 @@ func (s *Server) runAndCacheSimulation(steps int) {
 	}
 
 	for step := 0; step < steps; step++ {
+		dice := rand.Float64()
+		s.setDiceValue(ctx, dice)
+
 		// Collect all possible transitions from current states
 		var possibleTransitions []prolog.Transition
 		for _, state := range currentStates {
-			possibleTransitions = append(possibleTransitions, transitionMap[state]...)
+			for _, t := range transitionMap[state] {
+				if s.transitionAllowed(ctx, state, t) {
+					possibleTransitions = append(possibleTransitions, t)
+				}
+			}
 		}
 
 		if len(possibleTransitions) == 0 {
+			s.clearDiceValue(ctx)
 			break
 		}
 
@@ -921,11 +930,94 @@ func (s *Server) runAndCacheSimulation(steps int) {
 			From:  t.From,
 			To:    t.To,
 		})
+		s.clearDiceValue(ctx)
 	}
 
 	result.Steps = steps
 
 	s.cachedSimulation = &result
+}
+
+func (s *Server) transitionAllowed(ctx context.Context, state string, t prolog.Transition) bool {
+	if !s.stateGuardSatisfied(ctx, state) {
+		return false
+	}
+	if !s.transitionGuardSatisfied(ctx, t) {
+		return false
+	}
+	return true
+}
+
+func (s *Server) stateGuardSatisfied(ctx context.Context, state string) bool {
+	stateAtom := prologAtom(state)
+	hasGuard, err := s.engine.QueryOne(ctx, fmt.Sprintf("state_guard(%s, _).", stateAtom))
+	if err != nil {
+		log.Printf("state_guard lookup error: %v", err)
+		return true
+	}
+	if !hasGuard {
+		return true
+	}
+	ok, err := s.engine.QueryOne(ctx, fmt.Sprintf("state_guard(%s, Guard), call(Guard).", stateAtom))
+	if err != nil {
+		log.Printf("state_guard eval error: %v", err)
+		return false
+	}
+	return ok
+}
+
+func (s *Server) transitionGuardSatisfied(ctx context.Context, t prolog.Transition) bool {
+	fromAtom := prologAtom(t.From)
+	labelAtom := prologAtom(t.Label)
+	toAtom := prologAtom(t.To)
+	hasGuard, err := s.engine.QueryOne(ctx, fmt.Sprintf("transition_guard(%s, %s, %s, _).", fromAtom, labelAtom, toAtom))
+	if err != nil {
+		log.Printf("transition_guard lookup error: %v", err)
+		return true
+	}
+	if !hasGuard {
+		return true
+	}
+	ok, err := s.engine.QueryOne(ctx, fmt.Sprintf("transition_guard(%s, %s, %s, Guard), call(Guard).", fromAtom, labelAtom, toAtom))
+	if err != nil {
+		log.Printf("transition_guard eval error: %v", err)
+		return false
+	}
+	return ok
+}
+
+func (s *Server) setDiceValue(ctx context.Context, value float64) {
+	_, _ = s.engine.QueryOne(ctx, "retractall(dice0_value(_)).")
+	_, _ = s.engine.QueryOne(ctx, fmt.Sprintf("assertz(dice0_value(%s)).", formatFloat(value)))
+}
+
+func (s *Server) clearDiceValue(ctx context.Context) {
+	_, _ = s.engine.QueryOne(ctx, "retractall(dice0_value(_)).")
+}
+
+func prologAtom(value string) string {
+	if value == "" {
+		return "''"
+	}
+	for i, r := range value {
+		if (r >= 'a' && r <= 'z') || (i > 0 && ((r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_')) {
+			continue
+		}
+		if i == 0 {
+			break
+		}
+		goto needsQuote
+	}
+	if value[0] >= 'a' && value[0] <= 'z' {
+		return value
+	}
+needsQuote:
+	escaped := strings.ReplaceAll(value, "'", "''")
+	return "'" + escaped + "'"
+}
+
+func formatFloat(value float64) string {
+	return strconv.FormatFloat(value, 'f', -1, 64)
 }
 
 // handleSimulate returns the cached simulation result

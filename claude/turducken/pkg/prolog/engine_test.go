@@ -199,6 +199,50 @@ func TestSequenceDiagram(t *testing.T) {
 	}
 }
 
+func TestSequenceDiagramFromAnnotations(t *testing.T) {
+	e, _ := New()
+	ctx := context.Background()
+
+	e.LoadSpec(`
+        actor(sender).
+        actor(receiver).
+        actor_transition(sender, idle, send_ping, idle).
+        actor_transition(receiver, idle, recv_ping, idle).
+
+        msg_annotation(send_ping, send, receiver).
+        msg_annotation(recv_ping, recv, sender).
+    `)
+
+	seq, err := e.GetSequenceDiagram(ctx)
+	if err != nil {
+		t.Fatalf("GetSequenceDiagram error: %v", err)
+	}
+
+	if len(seq.Messages) != 2 {
+		t.Errorf("expected 2 messages, got %d", len(seq.Messages))
+	}
+
+	foundSender := false
+	foundReceiver := false
+	for _, m := range seq.Messages {
+		if m.From == "sender" && m.To == "receiver" && m.Label == "send_ping" {
+			foundSender = true
+		}
+		if m.From == "sender" && m.To == "receiver" && m.Label == "recv_ping" {
+			foundReceiver = true
+		}
+	}
+	if !foundSender {
+		t.Errorf("expected a sender -> receiver message")
+	}
+	if !foundReceiver {
+		t.Errorf("expected a receiver-derived message")
+	}
+	if len(seq.Lifelines) < 2 {
+		t.Errorf("expected lifelines from annotations, got %v", seq.Lifelines)
+	}
+}
+
 func TestPieChart(t *testing.T) {
 	e, _ := New()
 	ctx := context.Background()
@@ -273,6 +317,34 @@ func TestProperties(t *testing.T) {
 
 	if len(props) != 2 {
 		t.Errorf("expected 2 properties, got %d", len(props))
+	}
+}
+
+func TestDocsAndActors(t *testing.T) {
+	e, _ := New()
+	ctx := context.Background()
+
+	e.LoadSpec(`
+        doc(role_alpha, 'Alpha actor').
+        doc(title, 'Spec Title').
+        actor(alpha).
+        actor(beta, idle).
+    `)
+
+	docs, err := e.GetDocs(ctx)
+	if err != nil {
+		t.Fatalf("GetDocs error: %v", err)
+	}
+	if len(docs) != 2 {
+		t.Errorf("expected 2 docs, got %d", len(docs))
+	}
+
+	actors, err := e.GetActors(ctx)
+	if err != nil {
+		t.Fatalf("GetActors error: %v", err)
+	}
+	if len(actors) != 2 {
+		t.Errorf("expected 2 actors, got %d", len(actors))
 	}
 }
 

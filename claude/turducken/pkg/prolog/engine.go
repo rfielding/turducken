@@ -43,6 +43,8 @@ func (e *Engine) loadCore() error {
 % transition(From, Label, To) - declares a labeled transition
 % initial(State) - marks initial state
 % accepting(State) - marks accepting state
+% state_guard(State, Guard) - optional guard name for a state (Guard/1 uses Dice)
+% transition_guard(From, Label, To, Guard) - optional guard for a transition (Guard/1)
 
 % --- CTL Operators (Kripke structure based) ---
 % The model is defined by: state/2, transition/3, prop/2
@@ -152,6 +154,14 @@ check_ctl(Phi) :-
 % --- Actors ---
 % actor(Name, InitialState) - declares an actor
 % actor_transition(Actor, FromState, Event, ToState) - actor state machine
+
+% Default guard predicates (overridden by user specs when provided)
+state_guard(_, _) :- fail.
+transition_guard(_, _, _, _) :- fail.
+
+% Dice predicate used during simulation (dice0_value/1 is asserted by simulator)
+dice0(Low, High) :-
+    (dice0_value(D) -> D >= Low, D < High ; true).
 
 % --- Visualization Extraction ---
 
@@ -769,15 +779,29 @@ func (e *Engine) GetActors(ctx context.Context) ([]string, error) {
 	defer e.mu.RUnlock()
 
 	var actors []string
+	seen := make(map[string]bool)
 
-	sols, err := e.interpreter.QueryContext(ctx, "actor(Name, _).")
-	if err == nil {
+	queries := []string{
+		"actor(Name).",
+		"actor(Name, _).",
+	}
+
+	for _, query := range queries {
+		sols, err := e.interpreter.QueryContext(ctx, query)
+		if err != nil {
+			continue
+		}
 		for sols.Next() {
 			var result struct {
 				Name interface{}
 			}
 			if err := sols.Scan(&result); err == nil {
-				actors = append(actors, termToString(result.Name))
+				name := termToString(result.Name)
+				if name == "" || seen[name] {
+					continue
+				}
+				seen[name] = true
+				actors = append(actors, name)
 			}
 		}
 		sols.Close()
