@@ -293,16 +293,18 @@
             border: 1px solid var(--border-color);
             overflow: auto;
             flex: 1;
-            min-height: 500px;
+            min-height: 400px;
+            max-height: calc(100vh - 250px);
         }
         
         .mermaid-output .mermaid {
-            min-width: 800px;
+            min-width: auto;
         }
         
         .mermaid-output svg {
-            min-width: 700px;
-            min-height: 400px;
+            min-width: auto;
+            min-height: auto;
+            max-width: 100%;
         }
         
         .property-check {
@@ -737,6 +739,17 @@ transition(busy, done, idle).
                 
                 switch (type) {
                     case 'statemachine':
+                        // Check if we have actor-based state machines
+                        if (data.stateMachine && data.stateMachine.transitions) {
+                            // Group transitions by actor prefix
+                            const actorMachines = groupTransitionsByActor(data.stateMachine);
+                            if (Object.keys(actorMachines).length > 1) {
+                                // Render as multiple diagrams
+                                output.innerHTML = generateActorPanes(actorMachines);
+                                await mermaid.run();
+                                return;
+                            }
+                        }
                         mermaidCode = generateStateMachineMermaid(data.stateMachine);
                         break;
                     case 'sequence':
@@ -791,6 +804,89 @@ transition(busy, done, idle).
                             } catch (err) {
                                 output.innerHTML = `<div style="color: var(--accent-red);">Error: ${err.message}</div>`;
                             }
+                        }
+                        
+                        function groupTransitionsByActor(sm) {
+                            const actors = {};
+                            
+                            // Group by state prefix (ui_, server_, engine_, llm_)
+                            const prefixes = {
+                                'ui_': 'ui',
+                                'server_': 'http_server', 
+                                'engine_': 'prolog_engine',
+                                'llm_': 'llm_client'
+                            };
+                            
+                            sm.transitions.forEach(t => {
+                                let actor = 'unknown';
+                                for (const [prefix, name] of Object.entries(prefixes)) {
+                                    if (t.from.startsWith(prefix) || t.to.startsWith(prefix)) {
+                                        actor = name;
+                                        break;
+                                    }
+                                }
+                                
+                                if (!actors[actor]) {
+                                    actors[actor] = { transitions: [], initial: [] };
+                                }
+                                actors[actor].transitions.push(t);
+                            });
+                            
+                            // Add initial states
+                            sm.initial.forEach(s => {
+                                for (const [prefix, name] of Object.entries(prefixes)) {
+                                    if (s.startsWith(prefix)) {
+                                        if (actors[name]) {
+                                            actors[name].initial.push(s);
+                                        }
+                                        break;
+                                    }
+                                }
+                            });
+                            
+                            return actors;
+                        }
+                        
+                        function generateActorPanes(actorMachines) {
+                            let html = `<div style="
+                display: grid; 
+                grid-template-columns: 1fr 1fr; 
+                gap: 16px; 
+                overflow: auto;
+                max-height: 100%;
+                padding: 4px;
+            ">`;
+            
+            for (const [actor, sm] of Object.entries(actorMachines)) {
+                let code = 'stateDiagram-v2\n';
+                code += `    direction LR\n`;
+                
+                sm.initial.forEach(s => {
+                    code += `    [*] --> ${s}\n`;
+                });
+                
+                sm.transitions.forEach(t => {
+                    code += `    ${t.from} --> ${t.to}: ${t.label}\n`;
+                });
+                
+                html += `
+                    <div style="
+                        background: var(--bg-tertiary); 
+                        padding: 12px; 
+                        border-radius: 6px;
+                        min-height: 200px;
+                        overflow: auto;
+                    ">
+                        <h4 style="margin: 0 0 8px 0; color: var(--accent-blue); position: sticky; top: 0; background: var(--bg-tertiary); padding: 4px 0;">${actor}</h4>
+                        <div style="overflow: auto;">
+                            <pre class="mermaid" style="margin: 0;">${code}</pre>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            html += '</div>';
+            return html;
                         }
                         
                         function generateStateMachineMermaid(data) {
@@ -884,10 +980,13 @@ transition(busy, done, idle).
                             });
                             maxY += 5;
                             
+                            // Build title with series names as legend
+                            const seriesNames = data.series.map(s => s.name).join(', ');
+                            
                             let code = `xychart-beta
-                    title "Metrics Over Time"
-                    x-axis [${xValues}]
-                    y-axis "Value" 0 --> ${maxY}`;
+    title "Metrics: ${seriesNames}"
+    x-axis [${xValues}]
+    y-axis "Value" 0 --> ${maxY}`;
                             
                             data.series.forEach(series => {
                                 if (series.points && series.points.length > 0) {
