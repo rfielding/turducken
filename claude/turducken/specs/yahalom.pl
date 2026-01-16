@@ -73,6 +73,9 @@ actor_transition(attacker, attacker_compromised, forge_ticket, attacker_got_tick
 transition_guard(attacker_idle, steal_ticket, attacker_got_ticket, chance_steal).
 transition_guard(attacker_idle, compromise_s, attacker_compromised, chance_compromise).
 
+transition_prob(attacker_idle, steal_ticket, attacker_got_ticket, 0.7).
+transition_prob(attacker_idle, compromise_s, attacker_compromised, 0.3).
+
 chance_steal :- dice0(0.0, 0.7).
 chance_compromise :- dice0(0.7, 1.0).
 

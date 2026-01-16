@@ -87,6 +87,10 @@ transition_guard(attacker_idle, steal_tgt, attacker_got_tgt, chance_steal_tgt).
 transition_guard(attacker_idle, steal_ticket, attacker_got_ticket, chance_steal_ticket).
 transition_guard(attacker_idle, compromise_tgs, attacker_compromised, chance_compromise).
 
+transition_prob(attacker_idle, steal_tgt, attacker_got_tgt, 0.5).
+transition_prob(attacker_idle, steal_ticket, attacker_got_ticket, 0.3).
+transition_prob(attacker_idle, compromise_tgs, attacker_compromised, 0.2).
+
 chance_steal_tgt :- dice0(0.0, 0.5).
 chance_steal_ticket :- dice0(0.5, 0.8).
 chance_compromise :- dice0(0.8, 1.0).

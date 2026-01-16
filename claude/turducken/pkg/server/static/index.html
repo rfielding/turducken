@@ -421,6 +421,23 @@
             outline: none;
             color: var(--text-primary);
         }
+
+        .edgeLabel {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 1px 6px;
+            color: var(--text-primary);
+            display: inline-block;
+            line-height: 1.2;
+            white-space: pre-line;
+            font-size: 0.75rem;
+        }
+
+        .edgeLabel .label {
+            line-height: 1.2;
+            font-size: 0.75rem;
+        }
         
         .examples {
             margin-top: 12px;
@@ -1097,6 +1114,7 @@ transition(busy, done, idle).
         
         async function renderStates() {
             const descriptions = await loadVizDescriptions();
+            await refreshTransitionProbabilities();
             await visualize('sequence', 'statesSequenceOutput', {
                 title: 'Sequence',
                 description: descriptions.sequence
@@ -1481,7 +1499,7 @@ transition(busy, done, idle).
                 const sm = actorMachines[actor];
                 if (!sm) continue;
                 
-                let code = "%%{init: {'stateDiagram': {'nodeSpacing': 200, 'rankSpacing': 200}}}%%\n";
+                let code = "%%{init: {'stateDiagram': {'nodeSpacing': 300, 'rankSpacing': 240}}}%%\n";
                 code += 'stateDiagram-v2\n';
                 code += `    direction LR\n`;
                 
@@ -1495,10 +1513,11 @@ transition(busy, done, idle).
                         || transitionProbabilitiesByLabel.get(t.label);
                     if (/^(send_|recv_)/.test(t.label)) {
                         const dest = actorFromState(t.to);
-                        label = `${label} to ${dest}`;
+                        label = `${label} ${dest}`;
                     }
-                    if (prob) {
-                        label = `${label}\\n${prob}`;
+                    if (prob && String(prob).trim() !== '') {
+                        const probLabel = sanitizeMermaidLabel(String(prob));
+                        label = `${label} ${probLabel}`;
                     }
                     code += `    ${t.from} --> ${t.to}: ${label}\n`;
                 });
@@ -1529,7 +1548,7 @@ transition(busy, done, idle).
                 return null;
             }
             
-            let code = "%%{init: {'stateDiagram': {'nodeSpacing': 200, 'rankSpacing': 200}}}%%\n";
+            let code = "%%{init: {'stateDiagram': {'nodeSpacing': 300, 'rankSpacing': 240}}}%%\n";
             code += 'stateDiagram-v2\n';
             
             if (data.initial && data.initial.length > 0) {
@@ -1545,10 +1564,11 @@ transition(busy, done, idle).
                         || transitionProbabilitiesByLabel.get(t.label);
                     if (/^(send_|recv_)/.test(t.label)) {
                         const dest = actorFromState(t.to);
-                        label = `${label} to ${dest}`;
+                        label = `${label} ${dest}`;
                     }
-                    if (prob) {
-                        label = `${label}\\n${prob}`;
+                    if (prob && String(prob).trim() !== '') {
+                        const probLabel = sanitizeMermaidLabel(String(prob));
+                        label = `${label} ${probLabel}`;
                     }
                     code += `    ${t.from} --> ${t.to}: ${label}\n`;
                 });
@@ -2009,11 +2029,17 @@ transition(busy, done, idle).
                 transition_guard(attacker_idle, steal_ticket, attacker_got_ticket, chance_steal).
                 transition_guard(attacker_idle, compromise_s, attacker_compromised, chance_compromise).
                 
+                transition_prob(attacker_idle, steal_ticket, attacker_got_ticket, 0.7).
+                transition_prob(attacker_idle, compromise_s, attacker_compromised, 0.3).
+                
                 chance_steal :- dice0(0.0, 0.7).
                 chance_compromise :- dice0(0.7, 1.0).
                 
                 transition_guard(attacker_idle, steal_ticket, attacker_got_ticket, chance_steal).
                 transition_guard(attacker_idle, compromise_s, attacker_compromised, chance_compromise).
+                
+                transition_prob(attacker_idle, steal_ticket, attacker_got_ticket, 0.7).
+                transition_prob(attacker_idle, compromise_s, attacker_compromised, 0.3).
                 
                 chance_steal :- dice0(0.0, 0.7).
                 chance_compromise :- dice0(0.7, 1.0).
@@ -2220,6 +2246,10 @@ transition(busy, done, idle).
                 transition_guard(attacker_idle, steal_ticket, attacker_got_ticket, chance_steal_ticket).
                 transition_guard(attacker_idle, compromise_tgs, attacker_compromised, chance_compromise).
                 
+                transition_prob(attacker_idle, steal_tgt, attacker_got_tgt, 0.5).
+                transition_prob(attacker_idle, steal_ticket, attacker_got_ticket, 0.3).
+                transition_prob(attacker_idle, compromise_tgs, attacker_compromised, 0.2).
+                
                 chance_steal_tgt :- dice0(0.0, 0.5).
                 chance_steal_ticket :- dice0(0.5, 0.8).
                 chance_compromise :- dice0(0.8, 1.0).
@@ -2313,6 +2343,24 @@ transition(busy, done, idle).
             return `[${low},${high}]`;
         }
 
+        function formatExplicitProbability(raw) {
+            const trimmed = String(raw).trim();
+            if (trimmed.endsWith('%')) {
+                return `p=${trimmed}`;
+            }
+            const num = parseFloat(trimmed);
+            if (Number.isFinite(num)) {
+                if (num <= 1) {
+                    const pct = (num * 100).toFixed(0);
+                    return `p=${pct}%`;
+                }
+                if (num <= 100) {
+                    return `p=${num}%`;
+                }
+            }
+            return `p=${trimmed}`;
+        }
+
         function updateTransitionProbabilities(source) {
             transitionProbabilities.clear();
             transitionProbabilitiesByLabel.clear();
@@ -2343,6 +2391,17 @@ transition(busy, done, idle).
                         transitionProbabilitiesByLabel.set(label, prob);
                     }
                 }
+            }
+
+            const probRegex = /transition_prob\(\s*([^,]+)\s*,\s*([^,]+)\s*,\s*([^,]+)\s*,\s*([^)]+)\)\s*\./g;
+            while ((match = probRegex.exec(source)) !== null) {
+                const from = match[1].trim();
+                const label = match[2].trim();
+                const to = match[3].trim();
+                const probRaw = match[4].trim();
+                const prob = formatExplicitProbability(probRaw);
+                transitionProbabilities.set(transitionKey(from, label, to), prob);
+                transitionProbabilitiesByLabel.set(label, prob);
             }
         }
 
@@ -2596,6 +2655,17 @@ transition(busy, done, idle).
                 // Ignore; editor stays as-is.
             }
         }
+
+        async function refreshTransitionProbabilities() {
+            try {
+                const resp = await fetch('/api/spec');
+                const data = await resp.json();
+                const source = (data && data.source) ? data.source : '';
+                updateTransitionProbabilities(source);
+            } catch (_err) {
+                // Ignore
+            }
+        }
         
         function formatResponse(text) {
             // Simple markdown-like formatting
@@ -2679,7 +2749,7 @@ transition(busy, done, idle).
             let code = '';
             actors.forEach((actor, idx) => {
                 if (idx > 0) code += '\n\n';
-                code += "%%{init: {'stateDiagram': {'nodeSpacing': 200, 'rankSpacing': 200}}}%%\n";
+                code += "%%{init: {'stateDiagram': {'nodeSpacing': 300, 'rankSpacing': 240}}}%%\n";
                 code += `stateDiagram-v2\n`;
                 code += `    direction LR\n`;
                 code += `    %% ${actor.actor}\n`;
@@ -2694,10 +2764,11 @@ transition(busy, done, idle).
                         || transitionProbabilitiesByLabel.get(t.label);
                     if (/^(send_|recv_)/.test(t.label)) {
                         const dest = actorFromState(t.to);
-                        label = `${label} to ${dest}`;
+                        label = `${label} ${dest}`;
                     }
-                    if (prob) {
-                        label = `${label}\\n${prob}`;
+                    if (prob && String(prob).trim() !== '') {
+                        const probLabel = sanitizeMermaidLabel(String(prob));
+                        label = `${label} ${probLabel}`;
                     }
                     code += `    ${t.from} --> ${t.to}: ${label}\n`;
                 });
