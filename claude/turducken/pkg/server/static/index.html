@@ -2013,8 +2013,8 @@ transition(busy, done, idle).
                 transition_guard(attacker_idle, steal_ticket, attacker_got_ticket, chance_steal).
                 transition_guard(attacker_idle, compromise_s, attacker_compromised, chance_compromise).
                 
-                chance_steal :- dice0(0.0, 0.8).
-                chance_compromise :- dice0(0.8, 1.0).
+                chance_steal :- dice0(0.0, 0.7).
+                chance_compromise :- dice0(0.7, 1.0).
                 
                 channel(a_b, 1).
                 channel(b_s, 1).
