@@ -83,6 +83,14 @@ actor_transition(attacker, attacker_got_ticket, use_ticket, attacker_authed).
 actor_transition(attacker, attacker_idle, compromise_tgs, attacker_compromised).
 actor_transition(attacker, attacker_compromised, forge_ticket, attacker_got_ticket).
 
+transition_guard(attacker_idle, steal_tgt, attacker_got_tgt, chance_steal_tgt).
+transition_guard(attacker_idle, steal_ticket, attacker_got_ticket, chance_steal_ticket).
+transition_guard(attacker_idle, compromise_tgs, attacker_compromised, chance_compromise).
+
+chance_steal_tgt :- dice0(0.0, 0.5).
+chance_steal_ticket :- dice0(0.5, 0.8).
+chance_compromise :- dice0(0.8, 1.0).
+
 % === CHANNELS AND MESSAGE FLOW (for sequence derivation) ===
 channel(c_as, 1).
 channel(as_c, 1).

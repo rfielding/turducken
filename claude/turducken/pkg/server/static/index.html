@@ -648,6 +648,8 @@ transition(busy, done, idle).
         });
 
         const actorDescriptions = new Map();
+        const transitionProbabilities = new Map();
+        const transitionProbabilitiesByLabel = new Map();
         
         // Tab switching
         function switchTab(tabName) {
@@ -687,6 +689,7 @@ transition(busy, done, idle).
                     loadPromptPreview();
                     updateTerminalHelp();
                     updateCheckAvailability();
+                    updateTransitionProbabilities(source);
                     if (document.getElementById('tab-states').classList.contains('active')) {
                         renderStates();
                     }
@@ -1486,7 +1489,12 @@ transition(busy, done, idle).
                 });
                 
                 sm.transitions.forEach(t => {
-                    let label = toUnicodeLogic(t.label);
+                    let label = sanitizeMermaidLabel(toUnicodeLogic(t.label));
+                    const prob = transitionProbabilities.get(transitionKey(t.from, t.label, t.to))
+                        || transitionProbabilitiesByLabel.get(t.label);
+                    if (prob) {
+                        label = `${label} (${prob})`;
+                    }
                     if (/^(send_|recv_)/.test(t.label)) {
                         const dest = actorFromState(t.to);
                         label = `${label} to ${dest}`;
@@ -1530,7 +1538,12 @@ transition(busy, done, idle).
             
             if (data.transitions) {
                 data.transitions.forEach(t => {
-                    let label = toUnicodeLogic(t.label);
+                    let label = sanitizeMermaidLabel(toUnicodeLogic(t.label));
+                    const prob = transitionProbabilities.get(transitionKey(t.from, t.label, t.to))
+                        || transitionProbabilitiesByLabel.get(t.label);
+                    if (prob) {
+                        label = `${label} (${prob})`;
+                    }
                     if (/^(send_|recv_)/.test(t.label)) {
                         const dest = actorFromState(t.to);
                         label = `${label} to ${dest}`;
@@ -1563,7 +1576,7 @@ transition(busy, done, idle).
             
             if (data.messages) {
                 data.messages.forEach(m => {
-                    const label = toUnicodeLogic(m.label);
+                    const label = sanitizeMermaidLabel(toUnicodeLogic(m.label));
                     code += `    ${m.from}->>${m.to}: ${label}\n`;
                 });
             }
@@ -1994,6 +2007,12 @@ transition(busy, done, idle).
                 transition_guard(attacker_idle, steal_ticket, attacker_got_ticket, chance_steal).
                 transition_guard(attacker_idle, compromise_s, attacker_compromised, chance_compromise).
                 
+                chance_steal :- dice0(0.0, 0.7).
+                chance_compromise :- dice0(0.7, 1.0).
+                
+                transition_guard(attacker_idle, steal_ticket, attacker_got_ticket, chance_steal).
+                transition_guard(attacker_idle, compromise_s, attacker_compromised, chance_compromise).
+                
                 chance_steal :- dice0(0.0, 0.8).
                 chance_compromise :- dice0(0.8, 1.0).
                 
@@ -2195,6 +2214,14 @@ transition(busy, done, idle).
                 actor_transition(attacker, attacker_idle, compromise_tgs, attacker_compromised).
                 actor_transition(attacker, attacker_compromised, forge_ticket, attacker_got_ticket).
                 
+                transition_guard(attacker_idle, steal_tgt, attacker_got_tgt, chance_steal_tgt).
+                transition_guard(attacker_idle, steal_ticket, attacker_got_ticket, chance_steal_ticket).
+                transition_guard(attacker_idle, compromise_tgs, attacker_compromised, chance_compromise).
+                
+                chance_steal_tgt :- dice0(0.0, 0.5).
+                chance_steal_ticket :- dice0(0.5, 0.8).
+                chance_compromise :- dice0(0.8, 1.0).
+                
                 channel(c_as, 1).
                 channel(as_c, 1).
                 channel(c_tgs, 1).
@@ -2254,12 +2281,67 @@ transition(busy, done, idle).
                 .replace(/\\\//g, '∨');
         }
 
+        function sanitizeMermaidLabel(text) {
+            if (!text) {
+                return '';
+            }
+            return text.replace(/%/g, ' percent');
+        }
+
         function actorFromState(state) {
             if (!state) {
                 return 'unknown';
             }
             const idx = state.indexOf('_');
             return idx > 0 ? state.slice(0, idx) : state;
+        }
+
+        function transitionKey(from, label, to) {
+            return `${from}|${label}|${to}`;
+        }
+
+        function formatProbability(low, high) {
+            const lowNum = parseFloat(low);
+            const highNum = parseFloat(high);
+            if (Number.isFinite(lowNum) && Number.isFinite(highNum)) {
+                const p = Math.max(0, highNum - lowNum);
+                const pStr = p.toFixed(2).replace(/\.00$/, '');
+                return `p=${pStr}`;
+            }
+            return `[${low},${high}]`;
+        }
+
+        function updateTransitionProbabilities(source) {
+            transitionProbabilities.clear();
+            transitionProbabilitiesByLabel.clear();
+            if (!source) {
+                return;
+            }
+            const guardRanges = new Map();
+            const guardRegex = /(^|\n)\s*([a-z][A-Za-z0-9_]*)\s*:-\s*dice0\(\s*([^,]+)\s*,\s*([^)]+)\)\s*\.\s*/g;
+            let match;
+            while ((match = guardRegex.exec(source)) !== null) {
+                const guard = match[2];
+                const low = match[3].trim();
+                const high = match[4].trim();
+                guardRanges.set(guard, { low, high });
+            }
+
+            const guardUseRegex = /transition_guard\(\s*([^,]+)\s*,\s*([^,]+)\s*,\s*([^,]+)\s*,\s*([^)]+)\)\s*\./g;
+            while ((match = guardUseRegex.exec(source)) !== null) {
+                const from = match[1].trim();
+                const label = match[2].trim();
+                const to = match[3].trim();
+                const guard = match[4].trim();
+                const range = guardRanges.get(guard);
+                if (range) {
+                    const prob = formatProbability(range.low, range.high);
+                    transitionProbabilities.set(transitionKey(from, label, to), prob);
+                    if (!transitionProbabilitiesByLabel.has(label)) {
+                        transitionProbabilitiesByLabel.set(label, prob);
+                    }
+                }
+            }
         }
 
         function ctlToMath(text) {
@@ -2506,6 +2588,7 @@ transition(busy, done, idle).
                 if (source) {
                     editor.value = source;
                 }
+                updateTransitionProbabilities(source);
                 updateSpecBanner([], data);
             } catch (_err) {
                 // Ignore; editor stays as-is.
@@ -2603,7 +2686,12 @@ transition(busy, done, idle).
                 }
                 
                 actor.transitions.forEach(t => {
-                    let label = toUnicodeLogic(t.label);
+                    let label = sanitizeMermaidLabel(toUnicodeLogic(t.label));
+                    const prob = transitionProbabilities.get(transitionKey(t.from, t.label, t.to))
+                        || transitionProbabilitiesByLabel.get(t.label);
+                    if (prob) {
+                        label = `${label} (${prob})`;
+                    }
                     if (/^(send_|recv_)/.test(t.label)) {
                         const dest = actorFromState(t.to);
                         label = `${label} to ${dest}`;

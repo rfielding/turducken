@@ -70,6 +70,12 @@ actor_transition(attacker, attacker_got_ticket, use_ticket, attacker_got_kab).
 actor_transition(attacker, attacker_idle, compromise_s, attacker_compromised).
 actor_transition(attacker, attacker_compromised, forge_ticket, attacker_got_ticket).
 
+transition_guard(attacker_idle, steal_ticket, attacker_got_ticket, chance_steal).
+transition_guard(attacker_idle, compromise_s, attacker_compromised, chance_compromise).
+
+chance_steal :- dice0(0.0, 0.7).
+chance_compromise :- dice0(0.7, 1.0).
+
 % === CHANNELS AND MESSAGE FLOW (for sequence derivation) ===
 channel(a_b, 1).
 channel(b_s, 1).
