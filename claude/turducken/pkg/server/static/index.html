@@ -95,6 +95,30 @@
             display: flex;
             flex-direction: column;
         }
+
+        .spec-banner {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+        }
+
+        .spec-title {
+            color: var(--accent-blue);
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .spec-desc {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            margin-bottom: 4px;
+        }
+
+        .spec-file {
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+            font-family: monospace;
+        }
         
         .panel-header {
             display: flex;
@@ -134,7 +158,7 @@
             padding: 8px 16px;
             border: none;
             background: transparent;
-            color: var(--text-secondary);
+            color: var(--text-primary);
             cursor: pointer;
             border-radius: 6px;
             font-size: 0.9rem;
@@ -150,6 +174,7 @@
             background: var(--accent-blue);
             color: white;
         }
+
         
         textarea, input[type="text"] {
             width: 100%;
@@ -389,6 +414,13 @@
         .terminal-prompt {
             color: var(--accent-blue);
         }
+
+        .terminal-input {
+            display: inline-block;
+            min-width: 60%;
+            outline: none;
+            color: var(--text-primary);
+        }
         
         .examples {
             margin-top: 12px;
@@ -430,19 +462,24 @@
         <div class="main-grid">
             <!-- Left Panel: Spec & Visualization -->
             <div class="panel">
+                <div id="specBanner" class="spec-banner">
+                    <div class="spec-title">No spec loaded</div>
+                    <div class="spec-desc">Load a Prolog specification to see system details.</div>
+                    <div class="spec-file"></div>
+                </div>
                 <!-- Add new tab button in the tabs div -->
                 <div class="tabs">
-                    <button class="tab active" onclick="switchTab('states')">🧭 States</button>
+                    <button class="tab" onclick="switchTab('states')">🧭 States</button>
                     <button class="tab" onclick="switchTab('simulation')">📈 Simulation</button>
                     <button class="tab" onclick="switchTab('docs')">📖 Docs</button>
-                    <button class="tab" onclick="switchTab('spec')">📝 Prolog</button>
-                    <button class="tab" onclick="switchTab('prompt')">🧭 Sys Prompt</button>
-                    <button class="tab" onclick="switchTab('query')">🖥 Terminal</button>
                     <button class="tab" onclick="switchTab('check')">✓ Check</button>
+                    <button class="tab active" onclick="switchTab('spec')">📝 Prolog</button>
+                    <button class="tab" onclick="switchTab('prompt')">🧭 System Prompt</button>
+                    <button class="tab" onclick="switchTab('query')">🖥 Terminal</button>
                 </div>
                 
                 <!-- States Tab -->
-                <div id="tab-states" class="tab-content active">
+                <div id="tab-states" class="tab-content">
                     <div class="panel-body">
                         <div class="viz-section">
                             <div id="statesSequenceOutput" class="mermaid-output">
@@ -489,7 +526,7 @@
                 </div>
                 
                 <!-- Prolog Spec Tab -->
-                <div id="tab-spec" class="tab-content">
+                <div id="tab-spec" class="tab-content active">
                     <div class="panel-body">
                         <textarea id="specEditor" class="editor" placeholder="% Enter your Prolog specification here...
 
@@ -530,14 +567,8 @@ transition(busy, done, idle).
                 <!-- Query Tab -->
                 <div id="tab-query" class="tab-content">
                     <div class="panel-body">
-                        <input type="text" id="queryInput" placeholder="Enter Prolog query (e.g., transition(X, Y, Z).)">
-                        <div class="btn-group">
-                            <button class="btn btn-primary" onclick="runQuery()">Run</button>
-                        </div>
-                        <div class="help-text">
-                            Try: <code>transition(X, _, Y).</code> or <code>initial(X).</code>
-                        </div>
-                        <div id="queryOutput" class="terminal-output"></div>
+                        <div id="terminalHelp" class="help-text"></div>
+                        <div id="queryOutput" class="terminal-output" tabindex="0"></div>
                     </div>
                 </div>
                 
@@ -550,10 +581,11 @@ transition(busy, done, idle).
                         </div>
                         
                         <h4 style="margin: 16px 0 8px 0; color: var(--text-primary);">Custom Check</h4>
-                        <div class="property-check">
+                        <form class="property-check" onsubmit="event.preventDefault(); checkProperty();">
                             <input type="text" id="propertyInput" placeholder="CTL formula (e.g., ef(atom(done)))">
-                            <button class="btn btn-primary" onclick="checkProperty()">Check</button>
-                        </div>
+                            <button id="checkButton" class="btn btn-primary" type="submit">Check</button>
+                        </form>
+                        <div id="checkHint" class="help-text"></div>
                         <div class="help-text">
                             CTL operators: <code>ef</code>, <code>af</code>, <code>eg</code>, <code>ag</code>, <code>ex</code>, <code>ax</code>, <code>eu</code>, <code>au</code><br>
                             Combinators: <code>atom(p)</code>, <code>not(φ)</code>, <code>and(φ,ψ)</code>, <code>or(φ,ψ)</code>
@@ -631,6 +663,10 @@ transition(busy, done, idle).
                 renderStates();
             } else if (tabName === 'simulation') {
                 renderSimulation();
+            } else if (tabName === 'query') {
+                focusTerminalInput(document.getElementById('queryOutput'));
+            } else if (tabName === 'check') {
+                document.getElementById('propertyInput')?.focus();
             }
         }
         
@@ -651,6 +687,8 @@ transition(busy, done, idle).
                     loadProperties();
                     loadDocs();  // Add this line
                     loadPromptPreview();
+                    updateTerminalHelp();
+                    updateCheckAvailability();
                     if (document.getElementById('tab-states').classList.contains('active')) {
                         renderStates();
                     }
@@ -670,14 +708,18 @@ transition(busy, done, idle).
             try {
                 await fetch('/api/reset', { method: 'POST' });
                 setStatus('success', 'Reset complete');
+                updateTerminalHelp();
+                updateCheckAvailability();
+                switchTab('spec');
             } catch (err) {
                 setStatus('error', 'Reset failed');
             }
         }
         
         async function runQuery() {
-            const query = document.getElementById('queryInput').value;
             const output = document.getElementById('queryOutput');
+            const query = getTerminalInput(output);
+            const command = query.trim();
             
             if (!query) {
                 appendTerminalLine(output, 'Enter a query', 'var(--accent-yellow)');
@@ -686,6 +728,20 @@ transition(busy, done, idle).
 
             removeTrailingPrompt(output);
             appendTerminalLine(output, `| ?- ${query}`, 'var(--accent-blue)');
+
+            if (command === 'ls' || command === 'dir') {
+                try {
+                    const resp = await fetch('/api/spec');
+                    const data = await resp.json();
+                    const source = (data && data.source) ? data.source : '';
+                    const listing = parseFactsAndRulesFromSource(source);
+                    appendTerminalLine(output, listing || 'no facts or rules', 'var(--text-primary)');
+                } catch (err) {
+                    appendTerminalLine(output, `Failed: ${err.message}`, 'var(--accent-red)');
+                }
+                appendPromptLine(output);
+                return;
+            }
             
             try {
                 const resp = await fetch('/api/query', {
@@ -705,6 +761,64 @@ transition(busy, done, idle).
             }
 
             appendPromptLine(output);
+        }
+
+        function formatPredicateList(predicates) {
+            const entries = predicates
+                .map(p => `${p.name}/${p.arity}`)
+                .sort((a, b) => a.localeCompare(b));
+            if (entries.length === 0) {
+                return '';
+            }
+            const maxLen = entries.reduce((max, item) => Math.max(max, item.length), 0);
+            const colWidth = Math.min(Math.max(maxLen + 2, 12), 32);
+            const columns = Math.max(1, Math.floor(80 / colWidth));
+            let lines = [];
+            for (let i = 0; i < entries.length; i += columns) {
+                const row = entries.slice(i, i + columns)
+                    .map(item => item.padEnd(colWidth))
+                    .join('');
+                lines.push(row.trimEnd());
+            }
+            return lines.join('\n');
+        }
+
+        function parseFactsAndRulesFromSource(source) {
+            if (!source) {
+                return '';
+            }
+            const lines = source.split('\n').map(line => {
+                const idx = line.indexOf('%');
+                return idx >= 0 ? line.slice(0, idx) : line;
+            });
+            const joined = lines.join('\n');
+            const clauses = joined.split('.');
+            const facts = [];
+            const rules = [];
+            for (const clause of clauses) {
+                const trimmed = clause.trim();
+                if (!trimmed) {
+                    continue;
+                }
+                if (trimmed.includes(':-')) {
+                    rules.push(`${trimmed}.`);
+                } else {
+                    facts.push(`${trimmed}.`);
+                }
+            }
+            const sections = [];
+            if (facts.length > 0) {
+                sections.push('[facts]');
+                sections.push(...facts);
+            }
+            if (rules.length > 0) {
+                sections.push('[rules]');
+                sections.push(...rules);
+            }
+            if (sections.length === 0) {
+                return '';
+            }
+            return sections.join('\n');
         }
 
         function appendTerminalLine(output, text, color) {
@@ -739,8 +853,19 @@ transition(busy, done, idle).
             prompt.className = 'terminal-prompt';
             prompt.textContent = '| ?-';
             line.appendChild(prompt);
+            const input = document.createElement('span');
+            input.className = 'terminal-input';
+            input.contentEditable = 'true';
+            input.spellcheck = false;
+            input.autocapitalize = 'off';
+            input.autocomplete = 'off';
+            input.autocorrect = 'off';
+            input.style.marginLeft = '6px';
+            line.appendChild(input);
             output.appendChild(line);
             output.scrollTop = output.scrollHeight;
+            bindTerminalInput(input);
+            focusTerminalInput(output);
         }
 
         function removeTrailingPrompt(output) {
@@ -752,15 +877,74 @@ transition(busy, done, idle).
                 last.remove();
             }
         }
+
+        function focusTerminalInput(output) {
+            if (!output) {
+                return;
+            }
+            let input = output.querySelector('.terminal-input');
+            if (!input) {
+                appendPromptLine(output);
+                input = output.querySelector('.terminal-input');
+            }
+            if (input) {
+                input.focus();
+                const range = document.createRange();
+                range.selectNodeContents(input);
+                range.collapse(false);
+                const sel = window.getSelection();
+                sel.removeAllRanges();
+                sel.addRange(range);
+            }
+            output.scrollTop = output.scrollHeight;
+        }
+
+        function getTerminalInput(output) {
+            if (!output) {
+                return '';
+            }
+            const input = output.querySelector('.terminal-input');
+            if (!input) {
+                return '';
+            }
+            return input.textContent.trim();
+        }
+
+        function bindTerminalInput(input) {
+            if (!input) {
+                return;
+            }
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    runQuery();
+                    return;
+                }
+                if (e.key === 'Backspace') {
+                    const sel = window.getSelection();
+                    if (!sel || sel.rangeCount === 0) {
+                        return;
+                    }
+                    const range = sel.getRangeAt(0);
+                    if (range.collapsed && range.startOffset === 0 && input.textContent.length === 0) {
+                        e.preventDefault();
+                    }
+                }
+            });
+            input.addEventListener('input', () => {
+                scrollTerminalToBottom();
+            });
+        }
         
         async function checkProperty() {
-            const property = document.getElementById('propertyInput').value;
+            let property = document.getElementById('propertyInput').value;
             const resultDiv = document.getElementById('checkResult');
             
             if (!property) {
                 resultDiv.innerHTML = '';
                 return;
             }
+            property = property.trim().replace(/\.\s*$/, '');
             
             try {
                 const resp = await fetch('/api/check', {
@@ -1262,7 +1446,11 @@ transition(busy, done, idle).
                 });
                 
                 sm.transitions.forEach(t => {
-                    const label = toUnicodeLogic(t.label);
+                    let label = toUnicodeLogic(t.label);
+                    if (/^(send_|recv_)/.test(t.label)) {
+                        const dest = actorFromState(t.to);
+                        label = `${label}\\n to ${dest}`;
+                    }
                     code += `    ${t.from} --> ${t.to}: ${label}\n`;
                 });
                 
@@ -1302,7 +1490,11 @@ transition(busy, done, idle).
             
             if (data.transitions) {
                 data.transitions.forEach(t => {
-                    const label = toUnicodeLogic(t.label);
+                    let label = toUnicodeLogic(t.label);
+                    if (/^(send_|recv_)/.test(t.label)) {
+                        const dest = actorFromState(t.to);
+                        label = `${label}\\n to ${dest}`;
+                    }
                     code += `    ${t.from} --> ${t.to}: ${label}\n`;
                 });
             }
@@ -1332,8 +1524,8 @@ transition(busy, done, idle).
             if (data.messages) {
                 data.messages.forEach(m => {
                     let label = toUnicodeLogic(m.label);
-                    if (/^(send_|recv_)/.test(m.label)) {
-                        label = `${label}<br/>to ${m.to}`;
+                    if (!label.includes(' to ')) {
+                        label = `${label}\\n to ${m.to}`;
                     }
                     code += `    ${m.from}->>${m.to}: ${label}\n`;
                 });
@@ -2000,6 +2192,12 @@ transition(busy, done, idle).
             switchTab('spec');
         }
 
+        async function loadExampleAndApply(name) {
+            loadExample(name);
+            await applySpec();
+            switchTab('states');
+        }
+
         function toUnicodeLogic(text) {
             if (!text) {
                 return '';
@@ -2008,6 +2206,14 @@ transition(busy, done, idle).
                 .replace(/->/g, '→')
                 .replace(/\/\\/g, '∧')
                 .replace(/\\\//g, '∨');
+        }
+
+        function actorFromState(state) {
+            if (!state) {
+                return 'unknown';
+            }
+            const idx = state.indexOf('_');
+            return idx > 0 ? state.slice(0, idx) : state;
         }
 
         function ctlToMath(text) {
@@ -2149,7 +2355,7 @@ transition(busy, done, idle).
                         </div>
                     `}).join('');
                 } else {
-                    listDiv.innerHTML = '<div style="color: var(--text-secondary);">No properties defined in spec</div>';
+                    listDiv.innerHTML = '<div style="color: var(--text-secondary);">No properties defined in spec.</div><div style="margin-top: 8px;"><button class="btn btn-secondary" onclick="loadExampleAndApply(\'yahalom\')">Load Yahalom</button></div>';
                 }
             } catch (err) {
                 console.error('Error loading properties:', err);
@@ -2166,6 +2372,85 @@ transition(busy, done, idle).
             div.textContent = text;
             return div.innerHTML;
         }
+
+        async function updateTerminalHelp() {
+            const help = document.getElementById('terminalHelp');
+            if (!help) {
+                return;
+            }
+            try {
+                const [actorsResp, propertiesResp, docsResp] = await Promise.all([
+                    fetch('/api/actors'),
+                    fetch('/api/properties'),
+                    fetch('/api/docs')
+                ]);
+                const actorsData = await actorsResp.json();
+                const propertiesData = await propertiesResp.json();
+                const docsData = await docsResp.json();
+
+                const examples = [];
+                if (actorsData.success && Array.isArray(actorsData.actors) && actorsData.actors.length > 0) {
+                    examples.push('actor(X).');
+                }
+                if (propertiesData.success && Array.isArray(propertiesData.properties) && propertiesData.properties.length > 0) {
+                    examples.push('property(Name, Desc, Formula).');
+                }
+                if (docsData.success && Array.isArray(docsData.docs) && docsData.docs.length > 0) {
+                    examples.push('doc(Topic, Content).');
+                }
+
+                if (examples.length === 0) {
+                    help.innerHTML = `No spec loaded. <button class="btn btn-secondary" onclick="loadExampleAndApply('yahalom')">Load Yahalom</button>`;
+                    return;
+                }
+
+                help.innerHTML = `Examples: ${examples.map(ex => `<code>${escapeHtml(ex)}</code>`).join(' ')}`;
+            } catch (_err) {
+                help.textContent = '';
+            }
+        }
+
+        async function updateCheckAvailability() {
+            const input = document.getElementById('propertyInput');
+            const button = document.getElementById('checkButton');
+            const hint = document.getElementById('checkHint');
+            if (!input || !button || !hint) {
+                return;
+            }
+            try {
+                const resp = await fetch('/api/spec');
+                const data = await resp.json();
+                const source = (data && data.source) ? data.source.trim() : '';
+                const enabled = source.length > 0;
+                input.disabled = !enabled;
+                button.disabled = !enabled;
+                hint.textContent = enabled
+                    ? ''
+                    : 'Load a spec to enable CTL checks.';
+            } catch (_err) {
+                input.disabled = true;
+                button.disabled = true;
+                hint.textContent = 'Load a spec to enable CTL checks.';
+            }
+        }
+
+        async function loadSpecIntoEditor() {
+            const editor = document.getElementById('specEditor');
+            if (!editor) {
+                return;
+            }
+            try {
+                const resp = await fetch('/api/spec');
+                const data = await resp.json();
+                const source = (data && data.source) ? data.source : '';
+                if (source) {
+                    editor.value = source;
+                }
+                updateSpecBanner([], data);
+            } catch (_err) {
+                // Ignore; editor stays as-is.
+            }
+        }
         
         function formatResponse(text) {
             // Simple markdown-like formatting
@@ -2178,23 +2463,26 @@ transition(busy, done, idle).
         // Initialize on page load
         loadProperties();
         loadDocs();
+        updateTerminalHelp();
+        updateCheckAvailability();
         
         window.addEventListener('load', () => {
-            renderStates();
             appendPromptLine(document.getElementById('queryOutput'));
+            loadSpecIntoEditor().then(() => {
+                updateTerminalHelp();
+                updateCheckAvailability();
+                if (document.getElementById('tab-states').classList.contains('active')) {
+                    renderStates();
+                }
+                if (document.getElementById('tab-simulation').classList.contains('active')) {
+                    renderSimulation();
+                }
+            });
         });
         
         // Keyboard shortcuts
-        document.getElementById('queryInput').addEventListener('keydown', (e) => {
-            scrollTerminalToBottom();
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                runQuery();
-            }
-        });
-
-        document.getElementById('queryInput').addEventListener('input', () => {
-            scrollTerminalToBottom();
+        document.getElementById('queryOutput').addEventListener('click', () => {
+            focusTerminalInput(document.getElementById('queryOutput'));
         });
         
         document.getElementById('propertyInput').addEventListener('keydown', (e) => {
@@ -2255,7 +2543,11 @@ transition(busy, done, idle).
                 }
                 
                 actor.transitions.forEach(t => {
-                    const label = toUnicodeLogic(t.label);
+                    let label = toUnicodeLogic(t.label);
+                    if (/^(send_|recv_)/.test(t.label)) {
+                        const dest = actorFromState(t.to);
+                        label = `${label}\\n to ${dest}`;
+                    }
                     code += `    ${t.from} --> ${t.to}: ${label}\n`;
                 });
             });
@@ -2267,8 +2559,12 @@ transition(busy, done, idle).
 
         async function loadDocs() {
             try {
-                const resp = await fetch('/api/docs');
+                const [resp, specResp] = await Promise.all([
+                    fetch('/api/docs'),
+                    fetch('/api/spec')
+                ]);
                 const data = await resp.json();
+                const specData = await specResp.json();
                 const actorsResp = await fetch('/api/actors');
                 const actorsData = await actorsResp.json();
                 
@@ -2304,6 +2600,8 @@ transition(busy, done, idle).
                     }
                 }
                 
+                updateSpecBanner(docs, specData);
+
                 if (docs.length > 0) {
                     // Group docs by category based on topic prefix
                     const sections = {
@@ -2405,6 +2703,33 @@ transition(busy, done, idle).
             } catch (err) {
                 console.error('Error loading docs:', err);
             }
+        }
+
+        function updateSpecBanner(docs, specData) {
+            const banner = document.getElementById('specBanner');
+            if (!banner) {
+                return;
+            }
+            const titleEl = banner.querySelector('.spec-title');
+            const descEl = banner.querySelector('.spec-desc');
+            const fileEl = banner.querySelector('.spec-file');
+
+            const docMap = new Map((docs || []).map(doc => [doc.topic, doc.content]));
+            const title = docMap.get('title') || 'Loaded Specification';
+            const desc = docMap.get('overview') || docMap.get('description') || '';
+            const file = (specData && specData.file) ? specData.file : '';
+            const source = (specData && specData.source) ? specData.source.trim() : '';
+
+            if (!source) {
+                titleEl.textContent = 'No spec loaded';
+                descEl.textContent = 'Load a Prolog specification to see system details.';
+                fileEl.textContent = '';
+                return;
+            }
+
+            titleEl.textContent = title;
+            descEl.textContent = desc || 'This system is defined by the loaded Prolog specification.';
+            fileEl.textContent = file ? `File: ${file}` : '';
         }
         
         async function loadPromptPreview() {

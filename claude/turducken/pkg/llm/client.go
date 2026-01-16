@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
+	"strings"
 )
 
 // Provider specifies which LLM to use
@@ -42,6 +44,9 @@ func New() *Client {
 		httpClient:    http.DefaultClient,
 	}
 	
+	logEnv("ANTHROPIC_API_KEY", c.anthropicKey)
+	logEnv("OPENAI_API_KEY", c.openaiKey)
+	
 	// Default to OpenAI if available, else Anthropic
 	if c.openaiKey != "" {
 		c.provider = ProviderOpenAI
@@ -50,6 +55,18 @@ func New() *Client {
 	}
 	
 	return c
+}
+
+func logEnv(name, value string) {
+	if value == "" {
+		log.Printf("Env %s=<empty>", name)
+		return
+	}
+	if strings.HasSuffix(name, "API_KEY") {
+		log.Printf("Env %s=********", name)
+		return
+	}
+	log.Printf("Env %s=%s", name, value)
 }
 
 // SetProvider sets the LLM provider

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -1022,6 +1023,174 @@ func (e *Engine) GetActors(ctx context.Context) ([]string, error) {
 	return actors, nil
 }
 
+// PredicateInfo describes a predicate signature.
+type PredicateInfo struct {
+	Name  string `json:"name"`
+	Arity int    `json:"arity"`
+}
+
+// ListPredicates returns available predicate signatures.
+func (e *Engine) ListPredicates(ctx context.Context) ([]PredicateInfo, error) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	sols, err := e.interpreter.QueryContext(ctx, "current_predicate(Name/Arity).")
+	if err != nil {
+		return parsePredicatesFromSource(e.specSource), nil
+	}
+	defer sols.Close()
+
+	seen := make(map[string]bool)
+	var preds []PredicateInfo
+	for sols.Next() {
+		var result struct {
+			Pred interface{}
+		}
+		if err := sols.Scan(&result); err != nil {
+			continue
+		}
+		raw := termToString(result.Pred)
+		if raw == "" {
+			continue
+		}
+		idx := strings.LastIndex(raw, "/")
+		if idx <= 0 || idx == len(raw)-1 {
+			continue
+		}
+		name := raw[:idx]
+		arityStr := raw[idx+1:]
+		arity, err := strconv.Atoi(arityStr)
+		if err != nil {
+			continue
+		}
+		key := fmt.Sprintf("%s/%d", name, arity)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		preds = append(preds, PredicateInfo{
+			Name:  name,
+			Arity: arity,
+		})
+	}
+
+	if err := sols.Err(); err != nil {
+		return parsePredicatesFromSource(e.specSource), nil
+	}
+	return preds, nil
+}
+
+func parsePredicatesFromSource(source string) []PredicateInfo {
+	if source == "" {
+		return nil
+	}
+	lines := strings.Split(source, "\n")
+	var cleaned []string
+	for _, line := range lines {
+		if idx := strings.Index(line, "%"); idx >= 0 {
+			line = line[:idx]
+		}
+		cleaned = append(cleaned, line)
+	}
+	joined := strings.Join(cleaned, "\n")
+	clauses := strings.Split(joined, ".")
+
+	seen := make(map[string]bool)
+	var preds []PredicateInfo
+	for _, clause := range clauses {
+		head := strings.TrimSpace(clause)
+		if head == "" {
+			continue
+		}
+		if idx := strings.Index(head, ":-"); idx >= 0 {
+			head = strings.TrimSpace(head[:idx])
+		}
+		name, arity := parsePredicateHead(head)
+		if name == "" {
+			continue
+		}
+		key := fmt.Sprintf("%s/%d", name, arity)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		preds = append(preds, PredicateInfo{
+			Name:  name,
+			Arity: arity,
+		})
+	}
+
+	sort.Slice(preds, func(i, j int) bool {
+		if preds[i].Name == preds[j].Name {
+			return preds[i].Arity < preds[j].Arity
+		}
+		return preds[i].Name < preds[j].Name
+	})
+	return preds
+}
+
+func parsePredicateHead(head string) (string, int) {
+	if head == "" {
+		return "", 0
+	}
+	openIdx := strings.Index(head, "(")
+	if openIdx < 0 {
+		if isLowerAtom(head) {
+			return head, 0
+		}
+		return "", 0
+	}
+	name := strings.TrimSpace(head[:openIdx])
+	closeIdx := strings.LastIndex(head, ")")
+	if closeIdx < 0 || closeIdx < openIdx {
+		return "", 0
+	}
+	args := strings.TrimSpace(head[openIdx+1 : closeIdx])
+	if args == "" {
+		return name, 0
+	}
+	return name, countTopLevelArgs(args)
+}
+
+func countTopLevelArgs(args string) int {
+	depth := 0
+	count := 1
+	for _, r := range args {
+		switch r {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case ',':
+			if depth == 0 {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+func isLowerAtom(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i, r := range name {
+		if i == 0 {
+			if r < 'a' || r > 'z' {
+				return false
+			}
+			continue
+		}
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 // GetSource returns the current specification source
 func (e *Engine) GetSource() string {
 	e.mu.RLock()
@@ -1037,6 +1206,40 @@ func (e *Engine) Reset() error {
 	e.interpreter = prolog.New(nil, nil)
 	e.specSource = ""
 	return e.loadCore()
+}
+
+// AssertTurduckenVersion asserts the running server version.
+func (e *Engine) AssertTurduckenVersion(version string) error {
+	if version == "" {
+		return nil
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	atom := prologAtom(version)
+	query := fmt.Sprintf("assertz(turducken_version(%s)).", atom)
+	return e.interpreter.Exec(query)
+}
+
+func prologAtom(value string) string {
+	if value == "" {
+		return "''"
+	}
+	for i, r := range value {
+		if (r >= 'a' && r <= 'z') || (i > 0 && ((r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_')) {
+			continue
+		}
+		if i == 0 {
+			break
+		}
+		goto needsQuote
+	}
+	if value[0] >= 'a' && value[0] <= 'z' {
+		return value
+	}
+needsQuote:
+	escaped := strings.ReplaceAll(value, "'", "''")
+	return "'" + escaped + "'"
 }
 
 // RawQuery returns raw string output from a query (for debugging)

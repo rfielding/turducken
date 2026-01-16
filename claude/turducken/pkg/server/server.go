@@ -10,6 +10,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,6 +28,7 @@ type Server struct {
 	engine   *prolog.Engine
 	llm      *llm.Client
 	specFile string
+	version  string
 	mux      *http.ServeMux
 
 	// Metrics
@@ -81,21 +83,29 @@ func (s *Server) getTimeSeries() []TimePoint {
 }
 
 // New creates a new server instance
-func New(specFile string) (*Server, error) {
+func New(specFile string, version string) (*Server, error) {
 	engine, err := prolog.New()
 	if err != nil {
 		return nil, fmt.Errorf("creating prolog engine: %w", err)
+	}
+
+	if specFile == "" {
+		specFile = filepath.Join("specs", "yahalom.pl")
 	}
 
 	s := &Server{
 		engine:     engine,
 		llm:        llm.New(),
 		specFile:   specFile,
+		version:    version,
 		counters:   make(map[string]int64),
 		timeSeries: []TimePoint{},
 	}
 
-	// Load spec file if provided
+	if err := engine.AssertTurduckenVersion(version); err != nil {
+		return nil, fmt.Errorf("asserting version: %w", err)
+	}
+
 	if specFile != "" {
 		content, err := os.ReadFile(specFile)
 		if err != nil {
@@ -104,6 +114,7 @@ func New(specFile string) (*Server, error) {
 		if err := engine.LoadSpec(string(content)); err != nil {
 			return nil, fmt.Errorf("loading spec: %w", err)
 		}
+		s.runAndCacheSimulation(1000)
 	}
 
 	return s, nil
@@ -124,6 +135,7 @@ func (s *Server) ListenAndServe(addr string) error {
 	mux.HandleFunc("/api/properties", s.handleProperties)
 	mux.HandleFunc("/api/docs", s.handleDocs)
 	mux.HandleFunc("/api/actors", s.handleActors)
+	mux.HandleFunc("/api/predicates", s.handlePredicates)
 	mux.HandleFunc("/api/system-prompt", s.handleSystemPrompt)
 	mux.HandleFunc("/api/metrics", s.handleMetrics)
 	mux.HandleFunc("/api/openapi", s.handleOpenAPI)
@@ -144,6 +156,7 @@ func (s *Server) handleSpec(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		json.NewEncoder(w).Encode(map[string]string{
 			"source": s.engine.GetSource(),
+			"file":   s.specFile,
 		})
 
 	case http.MethodPost:
@@ -163,6 +176,10 @@ func (s *Server) handleSpec(w http.ResponseWriter, r *http.Request) {
 
 		// Reset and reload
 		if err := s.engine.Reset(); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if err := s.engine.AssertTurduckenVersion(s.version); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -497,6 +514,13 @@ func (s *Server) handleReset(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	if err := s.engine.AssertTurduckenVersion(s.version); err != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   err.Error(),
+		})
+		return
+	}
 
 	// Reload spec file if one was provided
 	if s.specFile != "" {
@@ -796,6 +820,28 @@ func (s *Server) handleOpenAPI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(openapi)
+}
+
+// handlePredicates lists available predicate signatures.
+func (s *Server) handlePredicates(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	preds, err := s.engine.ListPredicates(ctx)
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":    true,
+		"predicates": preds,
+	})
 }
 
 // handleStatic serves static files

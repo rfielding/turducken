@@ -9,6 +9,8 @@ import (
 	"github.com/rfielding/turducken/pkg/server"
 )
 
+var version = "dev"
+
 func main() {
 	port := flag.Int("port", 8080, "HTTP server port")
 	specFile := flag.String("spec", "", "Prolog specification file to load")
@@ -21,7 +23,7 @@ func main() {
 		}
 	}
 
-	srv, err := server.New(*specFile)
+	srv, err := server.New(*specFile, version)
 	if err != nil {
 		log.Fatalf("Failed to create server: %v", err)
 	}
