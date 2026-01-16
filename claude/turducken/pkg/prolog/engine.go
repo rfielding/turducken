@@ -162,7 +162,7 @@ state_guard(_, _) :- fail.
 transition_guard(_, _, _, _) :- fail.
 
 % Dice predicate used during simulation (dice0_value/1 is asserted by simulator)
-:- dynamic dice0_value/1.
+:- dynamic(dice0_value/1).
 dice0_value(_) :- fail.
 dice0(Low, High) :-
     (dice0_value(D) -> D >= Low, D < High ; true).
