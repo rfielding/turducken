@@ -1481,7 +1481,7 @@ transition(busy, done, idle).
                 const sm = actorMachines[actor];
                 if (!sm) continue;
                 
-                let code = "%%{init: {'stateDiagram': {'nodeSpacing': 60, 'rankSpacing': 60}}}%%\n";
+                let code = "%%{init: {'stateDiagram': {'nodeSpacing': 200, 'rankSpacing': 200}}}%%\n";
                 code += 'stateDiagram-v2\n';
                 code += `    direction LR\n`;
                 
@@ -1529,7 +1529,7 @@ transition(busy, done, idle).
                 return null;
             }
             
-            let code = "%%{init: {'stateDiagram': {'nodeSpacing': 60, 'rankSpacing': 60}}}%%\n";
+            let code = "%%{init: {'stateDiagram': {'nodeSpacing': 200, 'rankSpacing': 200}}}%%\n";
             code += 'stateDiagram-v2\n';
             
             if (data.initial && data.initial.length > 0) {
@@ -2679,7 +2679,7 @@ transition(busy, done, idle).
             let code = '';
             actors.forEach((actor, idx) => {
                 if (idx > 0) code += '\n\n';
-                code += "%%{init: {'stateDiagram': {'nodeSpacing': 60, 'rankSpacing': 60}}}%%\n";
+                code += "%%{init: {'stateDiagram': {'nodeSpacing': 200, 'rankSpacing': 200}}}%%\n";
                 code += `stateDiagram-v2\n`;
                 code += `    direction LR\n`;
                 code += `    %% ${actor.actor}\n`;
