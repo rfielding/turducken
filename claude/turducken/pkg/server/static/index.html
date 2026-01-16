@@ -1452,7 +1452,7 @@ transition(busy, done, idle).
                     let label = toUnicodeLogic(t.label);
                     if (/^(send_|recv_)/.test(t.label)) {
                         const dest = actorFromState(t.to);
-                        label = `${label}\\n to ${dest}`;
+                        label = `${label} to ${dest}`;
                     }
                     code += `    ${t.from} --> ${t.to}: ${label}\n`;
                 });
@@ -1496,7 +1496,7 @@ transition(busy, done, idle).
                     let label = toUnicodeLogic(t.label);
                     if (/^(send_|recv_)/.test(t.label)) {
                         const dest = actorFromState(t.to);
-                        label = `${label}\\n to ${dest}`;
+                        label = `${label} to ${dest}`;
                     }
                     code += `    ${t.from} --> ${t.to}: ${label}\n`;
                 });
@@ -2553,7 +2553,7 @@ transition(busy, done, idle).
                     let label = toUnicodeLogic(t.label);
                     if (/^(send_|recv_)/.test(t.label)) {
                         const dest = actorFromState(t.to);
-                        label = `${label}\\n to ${dest}`;
+                        label = `${label} to ${dest}`;
                     }
                     code += `    ${t.from} --> ${t.to}: ${label}\n`;
                 });
