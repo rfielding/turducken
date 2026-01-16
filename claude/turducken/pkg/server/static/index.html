@@ -1218,10 +1218,22 @@ transition(busy, done, idle).
                 const docMap = new Map(docs.map(doc => [doc.topic, doc.content]));
                 const defaultSequence = 'An authentication system represented as CSP with checked CTL properties.';
                 const baseSequence = docMap.get('viz_sequence') || docMap.get('description') || docMap.get('overview') || defaultSequence;
-                const ctlSuffix = ' This is the CSP actors which can have CTL properties.';
-                const sequenceText = baseSequence.includes('CTL')
-                    ? baseSequence
-                    : `${baseSequence}${ctlSuffix}`;
+                const items = [baseSequence];
+                const ctlSuffix = 'This is the CSP actors which can have CTL properties.';
+                if (!baseSequence.includes('CTL')) {
+                    items.push(ctlSuffix);
+                }
+                const varsText = docMap.get('vars') || '';
+                if (varsText) {
+                    const varsItems = varsText
+                        .split(';')
+                        .map(item => item.trim())
+                        .filter(Boolean);
+                    items.push(...varsItems);
+                }
+                const sequenceText = items.length > 0
+                    ? `- ${items.join('\n- ')}`
+                    : '';
                 const stateText = docMap.get('viz_statemachine') || '';
                 return { sequence: sequenceText, state: stateText };
             } catch (_err) {
@@ -1368,7 +1380,7 @@ transition(busy, done, idle).
                         ? `<div style="margin: 0 0 8px 0; color: var(--accent-blue); font-weight: 600;">${escapeHtml(opts.title)}</div>`
                         : '';
                     const descHtml = opts.description
-                        ? `<div class="viz-description" style="margin: 0 0 10px 0;">${escapeHtml(opts.description)}</div>`
+                        ? `<div class="viz-description" style="margin: 0 0 10px 0;">${formatDescription(opts.description)}</div>`
                         : '';
                     output.innerHTML = `${titleHtml}${descHtml}<pre class="mermaid">${mermaidCode}</pre>`;
                     try {
@@ -1927,6 +1939,7 @@ transition(busy, done, idle).
                 doc(role_initiator, 'A initiates the run by sending a fresh nonce to B.').
                 doc(role_responder, 'B responds and relays A and fresh nonces to S.').
                 doc(role_server, 'S creates a session key and returns tickets for A and B.').
+                doc(vars, 'Na,Nb are nonces; Kab is a session key; ticket_b is a ticket encrypted for B (e.g., {Kab,A}_Kbs).').
                 doc(role_attacker, 'Attacker can steal tickets or forge them after compromising S.').
                 
                 doc(viz_sequence, 'Sequence is derived from send/recv on channels.').
@@ -2017,6 +2030,7 @@ transition(busy, done, idle).
                 doc(role_initiator, 'A initiates by requesting a session key for B.').
                 doc(role_responder, 'B completes challenge-response with A.').
                 doc(role_server, 'S issues Kab and a ticket for B.').
+                doc(vars, 'Na,Nb are nonces; Kab is a session key; ticket_b is a ticket encrypted for B (e.g., {Kab,A}_Kbs).').
                 doc(role_attacker, 'Attacker can steal tickets or forge them after compromising S.').
                 
                 actor(a).
@@ -2110,6 +2124,7 @@ transition(busy, done, idle).
                 doc(role_as, 'Authentication Server issues a TGT.').
                 doc(role_tgs, 'Ticket Granting Server issues service tickets.').
                 doc(role_service, 'Service accepts the client ticket.').
+                doc(vars, 'TGT is the ticket-granting ticket; Kc_tgs is client-TGS session key; Kc_svc is client-service session key; Auth is an authenticator; SvcTicket is the service ticket.').
                 doc(role_attacker, 'Attacker can steal tickets or forge them after compromising TGS.').
                 
                 actor(client).
@@ -2400,6 +2415,16 @@ transition(busy, done, idle).
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+
+        function formatDescription(text) {
+            const lines = text.split('\n').map(line => line.trim()).filter(Boolean);
+            const isBulleted = lines.length > 0 && lines.every(line => line.startsWith('- '));
+            if (isBulleted) {
+                const items = lines.map(line => `<li>${escapeHtml(line.slice(2))}</li>`).join('');
+                return `<ul style="margin: 0 0 0 18px; padding: 0;">${items}</ul>`;
+            }
+            return escapeHtml(text).replace(/\n/g, '<br>');
         }
 
         async function updateTerminalHelp() {

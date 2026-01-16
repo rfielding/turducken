@@ -14,6 +14,7 @@ doc(role_client, 'Client requests tickets and authenticates to the service.').
 doc(role_as, 'Authentication Server issues a TGT.').
 doc(role_tgs, 'Ticket Granting Server issues service tickets.').
 doc(role_service, 'Service accepts the client ticket.').
+doc(vars, 'TGT is the ticket-granting ticket; Kc_tgs is client-TGS session key; Kc_svc is client-service session key; Auth is an authenticator; SvcTicket is the service ticket.').
 doc(role_attacker, 'Attacker can steal tickets or forge them after compromising TGS.').
 
 % === ACTORS ===

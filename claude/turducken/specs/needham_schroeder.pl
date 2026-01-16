@@ -13,6 +13,7 @@ doc(description, 'Sequence derived from send/recv on channels.').
 doc(role_initiator, 'A initiates by requesting a session key for B.').
 doc(role_responder, 'B completes challenge-response with A.').
 doc(role_server, 'S issues Kab and a ticket for B.').
+doc(vars, 'Na,Nb are nonces; Kab is a session key; ticket_b is a ticket encrypted for B (e.g., {Kab,A}_Kbs).').
 doc(role_attacker, 'Attacker can steal tickets or forge them after compromising S.').
 
 % === ACTORS ===

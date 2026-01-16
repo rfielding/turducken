@@ -13,6 +13,7 @@ doc(description, 'Actors A and B use server S to establish a shared session key 
 doc(role_initiator, 'A initiates the run by sending a fresh nonce to B.').
 doc(role_responder, 'B responds and relays A and fresh nonces to S.').
 doc(role_server, 'S creates a session key and returns tickets for A and B.').
+doc(vars, 'Na,Nb are nonces; Kab is a session key; ticket_b is a ticket encrypted for B (e.g., {Kab,A}_Kbs).').
 doc(role_attacker, 'Attacker can steal tickets or forge them after compromising S.').
 
 % === VISUALIZATION GUIDE ===
