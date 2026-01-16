@@ -421,7 +421,7 @@ func (e *Engine) GetStateMachine(ctx context.Context) (*StateMachine, error) {
 		fromStr := termToString(result.From)
 		labelStr := termToString(result.Label)
 		toStr := termToString(result.To)
-		log.Printf("Found transition: %s --%s--> %s", fromStr, labelStr, toStr)
+		log.Printf("Found transition: %s --[%s]--> %s", fromStr, labelStr, toStr)
 		sm.Transitions = append(sm.Transitions, Transition{
 			From:  fromStr,
 			Label: labelStr,
