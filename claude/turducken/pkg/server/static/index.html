@@ -582,7 +582,7 @@ transition(busy, done, idle).
                         
                         <h4 style="margin: 16px 0 8px 0; color: var(--text-primary);">Custom Check</h4>
                         <form class="property-check" onsubmit="event.preventDefault(); checkProperty();">
-                            <input type="text" id="propertyInput" placeholder="CTL formula (e.g., ef(atom(done)))">
+                            <input type="text" id="propertyInput" placeholder="CTL formula">
                             <button id="checkButton" class="btn btn-primary" type="submit">Check</button>
                         </form>
                         <div id="checkHint" class="help-text"></div>
@@ -718,16 +718,17 @@ transition(busy, done, idle).
         
         async function runQuery() {
             const output = document.getElementById('queryOutput');
-            const query = getTerminalInput(output);
-            const command = query.trim();
+            const rawQuery = getTerminalInput(output);
+            const trimmedQuery = rawQuery.trim();
+            const command = trimmedQuery.replace(/\.\s*$/, '');
             
-            if (!query) {
+            if (!command) {
                 appendTerminalLine(output, 'Enter a query', 'var(--accent-yellow)');
                 return;
             }
 
             removeTrailingPrompt(output);
-            appendTerminalLine(output, `| ?- ${query}`, 'var(--accent-blue)');
+            appendTerminalLine(output, `| ?- ${rawQuery.trim()}`, 'var(--accent-blue)');
 
             if (command === 'ls' || command === 'dir') {
                 try {
@@ -742,12 +743,14 @@ transition(busy, done, idle).
                 appendPromptLine(output);
                 return;
             }
+
+            const queryToSend = command.endsWith('.') ? command : `${command}.`;
             
             try {
                 const resp = await fetch('/api/query', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ query })
+                    body: JSON.stringify({ query: queryToSend })
                 });
                 const data = await resp.json();
 
@@ -2322,6 +2325,10 @@ transition(busy, done, idle).
                 
                 const listDiv = document.getElementById('propertyList');
                 if (data.success && data.properties && data.properties.length > 0) {
+                    const input = document.getElementById('propertyInput');
+                    if (input && data.properties[0].formula) {
+                        input.placeholder = data.properties[0].formula;
+                    }
                     listDiv.innerHTML = data.properties.map(p => {
                         let statusIcon = '';
                         let statusColor = '';
@@ -2404,7 +2411,7 @@ transition(busy, done, idle).
                     return;
                 }
 
-                help.innerHTML = `Examples: ${examples.map(ex => `<code>${escapeHtml(ex)}</code>`).join(' ')}`;
+                help.innerHTML = `Examples: <code>ls.</code> ${examples.map(ex => `<code>${escapeHtml(ex)}</code>`).join(' ')}`;
             } catch (_err) {
                 help.textContent = '';
             }
