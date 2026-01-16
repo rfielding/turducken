@@ -735,9 +735,17 @@ transition(busy, done, idle).
                     const source = (data && data.source) ? data.source : '';
                     const listing = parseFactsAndRulesFromSource(source);
                     appendTerminalLine(output, listing || 'no facts or rules', 'var(--text-primary)');
+                    appendPromptLine(output);
+                    return;
                 } catch (err) {
                     appendTerminalLine(output, `Failed: ${err.message}`, 'var(--accent-red)');
                 }
+                appendPromptLine(output);
+                return;
+            }
+
+            if (command === 'lsq' || command === 'lsq.') {
+                appendTerminalLine(output, 'Use `ls.` to list facts and rules.', 'var(--accent-yellow)');
                 appendPromptLine(output);
                 return;
             }
@@ -753,7 +761,12 @@ transition(busy, done, idle).
                 const data = await resp.json();
 
                 if (data.success) {
-                    appendTerminalLine(output, data.result, 'var(--text-primary)');
+                    if (Array.isArray(data.bindings) && data.bindings.length > 0) {
+                        const formatted = formatBindings(data.bindings);
+                        appendTerminalLine(output, formatted, 'var(--text-primary)');
+                    } else {
+                        appendTerminalLine(output, data.result, 'var(--text-primary)');
+                    }
                 } else {
                     appendTerminalLine(output, `Error: ${data.error}`, 'var(--accent-red)');
                 }
@@ -781,6 +794,20 @@ transition(busy, done, idle).
                     .join('');
                 lines.push(row.trimEnd());
             }
+            return lines.join('\n');
+        }
+
+        function formatBindings(bindings) {
+            const lines = [];
+            bindings.forEach((row, idx) => {
+                const keys = Object.keys(row).sort((a, b) => a.localeCompare(b));
+                if (keys.length === 0) {
+                    lines.push('true');
+                    return;
+                }
+                const parts = keys.map(key => `${key} = ${row[key]}`);
+                lines.push(parts.join(', '));
+            });
             return lines.join('\n');
         }
 
@@ -1524,10 +1551,7 @@ transition(busy, done, idle).
             
             if (data.messages) {
                 data.messages.forEach(m => {
-                    let label = toUnicodeLogic(m.label);
-                    if (!label.includes(' to ')) {
-                        label = `${label}\\n to ${m.to}`;
-                    }
+                    const label = toUnicodeLogic(m.label);
                     code += `    ${m.from}->>${m.to}: ${label}\n`;
                 });
             }

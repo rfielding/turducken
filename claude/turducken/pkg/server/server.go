@@ -227,7 +227,7 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	result, err := s.engine.RawQuery(ctx, req.Query)
+	bindings, err := s.engine.RawQueryBindings(ctx, req.Query)
 	if err != nil {
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": false,
@@ -236,9 +236,15 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	result := "false"
+	if len(bindings) > 0 {
+		result = "true"
+	}
+
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success": true,
-		"result":  result,
+		"success":  true,
+		"result":   result,
+		"bindings": bindings,
 	})
 
 	s.incCounter("queries")

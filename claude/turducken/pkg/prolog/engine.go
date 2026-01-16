@@ -1263,3 +1263,33 @@ func (e *Engine) RawQuery(ctx context.Context, query string) (string, error) {
 	}
 	return strings.Join(results, "\n"), sols.Err()
 }
+
+// RawQueryBindings returns variable bindings for a query.
+func (e *Engine) RawQueryBindings(ctx context.Context, query string) ([]map[string]string, error) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	sols, err := e.interpreter.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer sols.Close()
+
+	var bindings []map[string]string
+	for sols.Next() {
+		row := map[string]prolog.TermString{}
+		if err := sols.Scan(&row); err != nil {
+			return nil, err
+		}
+		converted := make(map[string]string, len(row))
+		for key, val := range row {
+			converted[key] = string(val)
+		}
+		bindings = append(bindings, converted)
+	}
+
+	if err := sols.Err(); err != nil {
+		return nil, err
+	}
+	return bindings, nil
+}
