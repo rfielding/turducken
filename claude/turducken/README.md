@@ -132,6 +132,8 @@ Then use the Chat tab to describe systems in natural language. The LLM will gene
 
 ## Example Specifications
 
+![bakery.png](bakery.png)
+
 See the `specs/` directory for examples:
 
 - `two_phase_commit.pl` - Two-phase commit protocol with actors and channels

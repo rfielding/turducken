@@ -1517,7 +1517,7 @@ transition(busy, done, idle).
                     }
                     if (prob && String(prob).trim() !== '') {
                         const probLabel = sanitizeMermaidLabel(String(prob));
-                        label = `${label} ${probLabel}`;
+                        label = `"${label}\\n${probLabel}"`;
                     }
                     code += `    ${t.from} --> ${t.to}: ${label}\n`;
                 });
@@ -1568,7 +1568,7 @@ transition(busy, done, idle).
                     }
                     if (prob && String(prob).trim() !== '') {
                         const probLabel = sanitizeMermaidLabel(String(prob));
-                        label = `${label} ${probLabel}`;
+                        label = `"${label}\\n${probLabel}"`;
                     }
                     code += `    ${t.from} --> ${t.to}: ${label}\n`;
                 });
@@ -2768,7 +2768,7 @@ transition(busy, done, idle).
                     }
                     if (prob && String(prob).trim() !== '') {
                         const probLabel = sanitizeMermaidLabel(String(prob));
-                        label = `${label} ${probLabel}`;
+                        label = `"${label}\\n${probLabel}"`;
                     }
                     code += `    ${t.from} --> ${t.to}: ${label}\n`;
                 });
