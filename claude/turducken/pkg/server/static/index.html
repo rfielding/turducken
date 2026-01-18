@@ -1222,7 +1222,9 @@ transition(busy, done, idle).
                     }));
                 }
 
-                const lineOptions = await loadLineChartOptions();
+                const lineConfig = await loadLineChartConfig();
+                const lineOptions = lineConfig.options;
+                const lineCharts = lineConfig.charts.get('simulation') || [];
                 if (!lineOptions.chartModes.has('simulation')) {
                     lineOptions.chartModes.set('simulation', 'diff');
                 }
@@ -1259,19 +1261,45 @@ transition(busy, done, idle).
                     ? `line_chart_option(simulation, ${simModeLabel}, ${simulationWindow}).`
                     : `line_chart_option(simulation, ${simModeLabel}).`;
 
-                let code = `xychart-beta
-    title "${simTitle}"
-    x-axis "Step" [${xAxis}]
-    y-axis "Count" 0 --> ${maxY}`;
-
-                for (const [sender, values] of seriesValues) {
-                    code += `\n    line [${values.join(', ')}]`;
-                }
+                const chartDefs = lineCharts.length > 0
+                    ? lineCharts
+                    : [{ name: simTitle, series: Array.from(seriesValues.keys()) }];
 
                 if (lineOutput) {
-                    const series = Array.from(seriesValues.keys()).map(name => ({ name }));
-                    const legendHtml = generateLineLegend({ series, title: legendTitle });
-                    lineOutput.innerHTML = `<pre class="mermaid">${code}</pre>${legendHtml}`;
+                    let chartsHtml = '';
+                    for (const chartDef of chartDefs) {
+                        const seriesList = chartDef.series && chartDef.series.length > 0
+                            ? chartDef.series
+                            : Array.from(seriesValues.keys());
+                        const filtered = new Map();
+                        for (const name of seriesList) {
+                            if (seriesValues.has(name)) {
+                                filtered.set(name, seriesValues.get(name));
+                            } else {
+                                filtered.set(name, Array(xValues.length).fill(0));
+                            }
+                        }
+                        let chartMax = 1;
+                        for (const values of filtered.values()) {
+                            for (const value of values) {
+                                if (value > chartMax) {
+                                    chartMax = value;
+                                }
+                            }
+                        }
+                        chartMax += 1;
+                        let code = `xychart-beta
+    title "${escapeHtml(chartDef.name)}"
+    x-axis "Step" [${xAxis}]
+    y-axis "Count" 0 --> ${chartMax}`;
+                        for (const values of filtered.values()) {
+                            code += `\n    line [${values.join(', ')}]`;
+                        }
+                        const series = Array.from(filtered.keys()).map(name => ({ name }));
+                        const legendHtml = generateLineLegend({ series, title: legendTitle });
+                        chartsHtml += `<div style="margin-bottom: 16px;"><pre class="mermaid">${code}</pre>${legendHtml}</div>`;
+                    }
+                    lineOutput.innerHTML = chartsHtml;
                 }
 
                 await mermaid.run();
@@ -1393,7 +1421,9 @@ transition(busy, done, idle).
                             }));
                         }
 
-                        const lineOptions = await loadLineChartOptions();
+                        const lineConfig = await loadLineChartConfig();
+                        const lineOptions = lineConfig.options;
+                        const lineCharts = lineConfig.charts.get('sequence') || [];
                         if (!lineOptions.chartModes.has('sequence')) {
                             lineOptions.chartModes.set('sequence', 'diff');
                         }
@@ -1448,18 +1478,45 @@ transition(busy, done, idle).
                             ? `line_chart_option(sequence, ${seqModeLabel}, ${sequenceWindow}).`
                             : `line_chart_option(sequence, ${seqModeLabel}).`;
 
-                        let code = `xychart-beta
-    title "${seqTitle}"
+                        const chartDefs = lineCharts.length > 0
+                            ? lineCharts
+                            : [{ name: seqTitle, series: Array.from(sampledSeries.keys()) }];
+
+                        let chartsHtml = '';
+                        for (const chartDef of chartDefs) {
+                            const seriesList = chartDef.series && chartDef.series.length > 0
+                                ? chartDef.series
+                                : Array.from(sampledSeries.keys());
+                            const filtered = new Map();
+                            for (const name of seriesList) {
+                                if (sampledSeries.has(name)) {
+                                    filtered.set(name, sampledSeries.get(name));
+                                } else {
+                                    filtered.set(name, Array(sampledX.length).fill(0));
+                                }
+                            }
+                            let chartMax = 1;
+                            for (const values of filtered.values()) {
+                                for (const value of values) {
+                                    if (value > chartMax) {
+                                        chartMax = value;
+                                    }
+                                }
+                            }
+                            chartMax += 1;
+
+                            let code = `xychart-beta
+    title "${escapeHtml(chartDef.name)}"
     x-axis "Seq" [${xAxis}]
-    y-axis "Count" 0 --> ${maxY}`;
-                        
-                        for (const [sender, values] of sampledSeries) {
-                            code += `\n    line [${values.join(', ')}]`;
+    y-axis "Count" 0 --> ${chartMax}`;
+                            for (const values of filtered.values()) {
+                                code += `\n    line [${values.join(', ')}]`;
+                            }
+                            const series = Array.from(filtered.keys()).map(name => ({ name }));
+                            const legendHtml = generateLineLegend({ series, title: seqLegendTitle });
+                            chartsHtml += `<div style="margin-bottom: 16px;"><pre class="mermaid">${code}</pre>${legendHtml}</div>`;
                         }
-                        
-                        const series = Array.from(sampledSeries.keys()).map(name => ({ name }));
-                        const legendHtml = generateLineLegend({ series, title: seqLegendTitle });
-                        output.innerHTML = `<pre class="mermaid">${code}</pre>${legendHtml}`;
+                        output.innerHTML = chartsHtml;
                         try {
                             await mermaid.run();
                         } catch (mermaidErr) {
@@ -1930,19 +1987,59 @@ transition(busy, done, idle).
             };
         }
 
-        async function loadLineChartOptions() {
+        function parsePrologList(listText) {
+            const trimmed = listText.trim();
+            if (!trimmed.startsWith('[') || !trimmed.endsWith(']')) {
+                return [];
+            }
+            const inner = trimmed.slice(1, -1).trim();
+            if (!inner) {
+                return [];
+            }
+            return inner
+                .split(',')
+                .map(item => cleanPrologAtom(item))
+                .filter(Boolean);
+        }
+
+        function parseLineChartDefinitions(source) {
+            const charts = new Map();
+            const chartRegex = /line_chart\(\s*([^,]+)\s*,\s*([^,]+)\s*,\s*(\[[^\]]*\])\s*\)\s*\./g;
+            let match;
+            while ((match = chartRegex.exec(source)) !== null) {
+                const scope = cleanPrologAtom(match[1]);
+                const name = cleanPrologAtom(match[2]);
+                const series = parsePrologList(match[3]);
+                if (!scope || !name) {
+                    continue;
+                }
+                if (!charts.has(scope)) {
+                    charts.set(scope, []);
+                }
+                charts.get(scope).push({ name, series });
+            }
+            return charts;
+        }
+
+        async function loadLineChartConfig() {
             try {
                 const resp = await fetch('/api/spec');
                 const data = await resp.json();
                 const source = data && data.source ? data.source : '';
-                return parseLineChartOptions(source);
+                return {
+                    options: parseLineChartOptions(source),
+                    charts: parseLineChartDefinitions(source)
+                };
             } catch (_err) {
                 return {
-                    chartModes: new Map(),
-                    chartSmooth: new Map(),
-                    diffSeries: new Set(),
-                    seriesSmooth: new Map(),
-                    divideSeries: new Map()
+                    options: {
+                        chartModes: new Map(),
+                        chartSmooth: new Map(),
+                        diffSeries: new Set(),
+                        seriesSmooth: new Map(),
+                        divideSeries: new Map()
+                    },
+                    charts: new Map()
                 };
             }
         }
