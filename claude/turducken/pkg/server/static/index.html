@@ -461,6 +461,45 @@
             color: var(--text-secondary);
             font-size: 0.9rem;
         }
+
+        .viz-controls {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+        }
+
+        .viz-controls-label {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+        }
+
+        .viz-controls-buttons {
+            display: flex;
+            gap: 8px;
+        }
+
+        .mermaid-source {
+            margin-top: 8px;
+            background: var(--bg-primary);
+            border: 1px dashed var(--border-color);
+            border-radius: 6px;
+            padding: 8px;
+        }
+
+        .mermaid-source summary {
+            cursor: pointer;
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+        }
+
+        .mermaid-source pre {
+            margin: 8px 0 0 0;
+            font-size: 0.8rem;
+            white-space: pre-wrap;
+        }
     </style>
 </head>
 <body>
@@ -499,6 +538,13 @@
                 <!-- States Tab -->
                 <div id="tab-states" class="tab-content">
                     <div class="panel-body">
+                        <div class="viz-controls">
+                            <span class="viz-controls-label">State machine layout</span>
+                            <div class="viz-controls-buttons">
+                                <button id="stateDirLR" class="btn btn-secondary" onclick="setStateMachineDirection('LR')">Left → Right</button>
+                                <button id="stateDirTB" class="btn btn-secondary" onclick="setStateMachineDirection('TB')">Top → Bottom</button>
+                            </div>
+                        </div>
                         <div class="viz-section">
                             <div id="statesSequenceOutput" class="mermaid-output">
                                 <div style="color: var(--text-secondary); text-align: center;">
@@ -669,6 +715,9 @@ transition(busy, done, idle).
         const actorDescriptions = new Map();
         const transitionProbabilities = new Map();
         const transitionProbabilitiesByLabel = new Map();
+        const messageAnnotations = new Map();
+        let stateMachineDirection = 'TB';
+        let showMermaidSource = true;
         
         // Tab switching
         function switchTab(tabName) {
@@ -687,6 +736,33 @@ transition(busy, done, idle).
             } else if (tabName === 'query') {
                 focusTerminalInput(document.getElementById('queryOutput'));
             }
+        }
+
+        function setStateMachineDirection(direction) {
+            stateMachineDirection = (direction === 'TB') ? 'TB' : 'LR';
+            updateStateDirectionButtons();
+            if (document.getElementById('tab-states').classList.contains('active')) {
+                renderStates();
+            }
+        }
+
+        function updateStateDirectionButtons() {
+            const lrBtn = document.getElementById('stateDirLR');
+            const tbBtn = document.getElementById('stateDirTB');
+            if (!lrBtn || !tbBtn) {
+                return;
+            }
+            lrBtn.classList.toggle('btn-primary', stateMachineDirection === 'LR');
+            lrBtn.classList.toggle('btn-secondary', stateMachineDirection !== 'LR');
+            tbBtn.classList.toggle('btn-primary', stateMachineDirection === 'TB');
+            tbBtn.classList.toggle('btn-secondary', stateMachineDirection !== 'TB');
+        }
+
+        function getMermaidSourceHtml(code) {
+            if (!showMermaidSource || !code) {
+                return '';
+            }
+            return `<details class="mermaid-source"><summary>Mermaid source</summary><pre>${escapeHtml(code)}</pre></details>`;
         }
         
         // API calls
@@ -1622,7 +1698,8 @@ transition(busy, done, idle).
                     const descHtml = opts.description
                         ? `<div class="viz-description" style="margin: 0 0 10px 0;">${formatDescription(opts.description)}</div>`
                         : '';
-                    output.innerHTML = `${titleHtml}${descHtml}<pre class="mermaid">${mermaidCode}</pre>`;
+                    const sourceHtml = getMermaidSourceHtml(mermaidCode);
+                    output.innerHTML = `${titleHtml}${descHtml}<pre class="mermaid">${mermaidCode}</pre>${sourceHtml}`;
                     try {
                         await mermaid.run();
                     } catch (mermaidErr) {
@@ -1720,27 +1797,18 @@ transition(busy, done, idle).
                 
                 let code = "%%{init: {'stateDiagram': {'nodeSpacing': 300, 'rankSpacing': 240}}}%%\n";
                 code += 'stateDiagram-v2\n';
-                code += `    direction LR\n`;
+                code += `    direction ${stateMachineDirection}\n`;
                 
                 sm.initial.forEach(s => {
                     code += `    [*] --> ${s}\n`;
                 });
                 
                 sm.transitions.forEach(t => {
-                    let label = sanitizeMermaidLabel(toUnicodeLogic(t.label));
-                    const prob = transitionProbabilities.get(transitionKey(t.from, t.label, t.to))
-                        || transitionProbabilitiesByLabel.get(t.label);
-                    if (/^(send_|recv_)/.test(t.label)) {
-                        const dest = actorFromState(t.to);
-                        label = `${label} ${dest}`;
-                    }
-                    if (prob && String(prob).trim() !== '') {
-                        const probLabel = sanitizeMermaidLabel(String(prob));
-                        label = `"${label}\\n${probLabel}"`;
-                    }
+                    const label = formatStateTransitionLabel(t);
                     code += `    ${t.from} --> ${t.to}: ${label}\n`;
                 });
                 
+                const sourceHtml = getMermaidSourceHtml(code);
                 html += `
                     <div style="
                         background: var(--bg-tertiary); 
@@ -1754,6 +1822,7 @@ transition(busy, done, idle).
                         <div style="overflow-x: auto; min-width: max-content;">
                             <pre class="mermaid" style="margin: 0;">${code}</pre>
                         </div>
+                        ${sourceHtml}
                     </div>
                 `;
             }
@@ -1769,6 +1838,7 @@ transition(busy, done, idle).
             
             let code = "%%{init: {'stateDiagram': {'nodeSpacing': 300, 'rankSpacing': 240, 'edgeLabelSpacing': 20}}}%%\n";
             code += 'stateDiagram-v2\n';
+            code += `    direction ${stateMachineDirection}\n`;
             
             if (data.initial && data.initial.length > 0) {
                 data.initial.forEach(s => {
@@ -1778,17 +1848,7 @@ transition(busy, done, idle).
             
             if (data.transitions) {
                 data.transitions.forEach(t => {
-                    let label = sanitizeMermaidLabel(toUnicodeLogic(t.label));
-                    const prob = transitionProbabilities.get(transitionKey(t.from, t.label, t.to))
-                        || transitionProbabilitiesByLabel.get(t.label);
-                    if (/^(send_|recv_)/.test(t.label)) {
-                        const dest = actorFromState(t.to);
-                        label = `${label} ${dest}`;
-                    }
-                    if (prob && String(prob).trim() !== '') {
-                        const probLabel = sanitizeMermaidLabel(String(prob));
-                        label = `"${label}\\n${probLabel}"`;
-                    }
+                    const label = formatStateTransitionLabel(t);
                     code += `    ${t.from} --> ${t.to}: ${label}\n`;
                 });
             }
@@ -1948,7 +2008,7 @@ transition(busy, done, idle).
             if (!text) {
                 return '';
             }
-            return text.replace(/%/g, ' percent');
+            return text;
         }
 
         function cleanPrologAtom(text) {
@@ -1957,6 +2017,54 @@ transition(busy, done, idle).
                 return trimmed.slice(1, -1).replace(/''/g, "'");
             }
             return trimmed;
+        }
+
+        function formatStateTransitionLabel(transition) {
+            if (!transition) {
+                return '';
+            }
+            const rawLabel = cleanPrologAtom(transition.label || '');
+            let label = sanitizeMermaidLabel(toUnicodeLogic(rawLabel));
+            const prob = transitionProbabilities.get(transitionKey(transition.from, rawLabel, transition.to))
+                || transitionProbabilitiesByLabel.get(rawLabel);
+            const directionHint = /^(send|recv)(_|$)/.test(rawLabel) ? RegExp.$1 : '';
+            const ann = messageAnnotations.get(rawLabel);
+            let dest = '';
+            let direction = '';
+            if (ann) {
+                if (directionHint === 'send' && ann.send && ann.send.length > 0) {
+                    direction = 'send';
+                    dest = ann.send[0];
+                } else if (directionHint === 'recv' && ann.recv && ann.recv.length > 0) {
+                    direction = 'recv';
+                    dest = ann.recv[0];
+                } else if (ann.send && ann.send.length > 0) {
+                    direction = 'send';
+                    dest = ann.send[0];
+                } else if (ann.recv && ann.recv.length > 0) {
+                    direction = 'recv';
+                    dest = ann.recv[0];
+                }
+            }
+            if (!dest && directionHint) {
+                const fromActor = actorFromState(transition.from);
+                const toActor = actorFromState(transition.to);
+                if (toActor && fromActor && toActor !== fromActor) {
+                    dest = toActor;
+                    direction = directionHint;
+                }
+            }
+            if (dest) {
+                label = direction === 'recv'
+                    ? `${label} ← ${dest}`
+                    : `${label} → ${dest}`;
+            }
+            if (prob && String(prob).trim() !== '') {
+                const probLabel = sanitizeMermaidLabel(String(prob));
+                label = `${label} -- ${probLabel}`;
+            }
+            label = label.replace(/"/g, "'");
+            return label;
         }
 
         function normalizeLineMode(text) {
@@ -2263,6 +2371,12 @@ transition(busy, done, idle).
             return `${from}|${label}|${to}`;
         }
 
+        function guardName(text) {
+            const cleaned = cleanPrologAtom(text || '');
+            const idx = cleaned.indexOf('(');
+            return idx > 0 ? cleaned.slice(0, idx).trim() : cleaned;
+        }
+
         function formatProbability(low, high) {
             const lowNum = parseFloat(low);
             const highNum = parseFloat(high);
@@ -2270,10 +2384,10 @@ transition(busy, done, idle).
                 const p = Math.max(0, highNum - lowNum);
                 if (p <= 1) {
                     const pct = (p * 100).toFixed(0);
-                    return `p=${pct}pct`;
+                    return `${pct}%`;
                 }
                 const pStr = p.toFixed(2).replace(/\.00$/, '');
-                return `p=${pStr}pct`;
+                return `${pStr}%`;
             }
             return `[${low},${high}]`;
         }
@@ -2281,43 +2395,51 @@ transition(busy, done, idle).
         function formatExplicitProbability(raw) {
             const trimmed = String(raw).trim();
             if (trimmed.endsWith('%')) {
-                return `p=${trimmed.slice(0, -1)}pct`;
+                return `${trimmed.slice(0, -1)}%`;
             }
             const num = parseFloat(trimmed);
             if (Number.isFinite(num)) {
                 if (num <= 1) {
                     const pct = (num * 100).toFixed(0);
-                    return `p=${pct}pct`;
+                    return `${pct}%`;
                 }
                 if (num <= 100) {
-                    return `p=${num}pct`;
+                    return `${num}%`;
                 }
             }
-            return `p=${trimmed}`;
+            return `${trimmed}%`;
         }
 
         function updateTransitionProbabilities(source) {
             transitionProbabilities.clear();
             transitionProbabilitiesByLabel.clear();
+            messageAnnotations.clear();
             if (!source) {
                 return;
             }
             const guardRanges = new Map();
-            const guardRegex = /(^|\n)\s*([a-z][A-Za-z0-9_]*)\s*:-\s*dice0\(\s*([^,]+)\s*,\s*([^)]+)\)\s*\.\s*/g;
+            const guardRegex = /(^|\n)\s*([a-z][A-Za-z0-9_]*)(?:\s*\([^)]*\))?\s*:-\s*dice0\(\s*([^,]+)\s*,\s*([^)]+)\)\s*\.\s*/g;
             let match;
             while ((match = guardRegex.exec(source)) !== null) {
-                const guard = match[2];
+                const guard = guardName(match[2]);
                 const low = match[3].trim();
                 const high = match[4].trim();
                 guardRanges.set(guard, { low, high });
             }
 
+            guardRanges.forEach((range, guard) => {
+                if (!transitionProbabilitiesByLabel.has(guard)) {
+                    const prob = formatProbability(range.low, range.high);
+                    transitionProbabilitiesByLabel.set(guard, prob);
+                }
+            });
+
             const guardUseRegex = /transition_guard\(\s*([^,]+)\s*,\s*([^,]+)\s*,\s*([^,]+)\s*,\s*([^)]+)\)\s*\./g;
             while ((match = guardUseRegex.exec(source)) !== null) {
-                const from = match[1].trim();
-                const label = match[2].trim();
-                const to = match[3].trim();
-                const guard = match[4].trim();
+                const from = cleanPrologAtom(match[1].trim());
+                const label = cleanPrologAtom(match[2].trim());
+                const to = cleanPrologAtom(match[3].trim());
+                const guard = guardName(match[4].trim());
                 const range = guardRanges.get(guard);
                 if (range) {
                     const prob = formatProbability(range.low, range.high);
@@ -2330,13 +2452,34 @@ transition(busy, done, idle).
 
             const probRegex = /transition_prob\(\s*([^,]+)\s*,\s*([^,]+)\s*,\s*([^,]+)\s*,\s*([^)]+)\)\s*\./g;
             while ((match = probRegex.exec(source)) !== null) {
-                const from = match[1].trim();
-                const label = match[2].trim();
-                const to = match[3].trim();
+                const from = cleanPrologAtom(match[1].trim());
+                const label = cleanPrologAtom(match[2].trim());
+                const to = cleanPrologAtom(match[3].trim());
                 const probRaw = match[4].trim();
                 const prob = formatExplicitProbability(probRaw);
                 transitionProbabilities.set(transitionKey(from, label, to), prob);
                 transitionProbabilitiesByLabel.set(label, prob);
+            }
+
+            const msgAnnotationRegex = /msg_annotation\(\s*([^,]+)\s*,\s*([^,]+)\s*,\s*([^)]+)\)\s*\./g;
+            while ((match = msgAnnotationRegex.exec(source)) !== null) {
+                const label = cleanPrologAtom(match[1].trim());
+                const direction = cleanPrologAtom(match[2].trim()).toLowerCase();
+                const actor = cleanPrologAtom(match[3].trim());
+                if (!label || !actor) {
+                    continue;
+                }
+                const entry = messageAnnotations.get(label) || { send: [], recv: [] };
+                if (direction === 'send') {
+                    if (!entry.send.includes(actor)) {
+                        entry.send.push(actor);
+                    }
+                } else if (direction === 'recv') {
+                    if (!entry.recv.includes(actor)) {
+                        entry.recv.push(actor);
+                    }
+                }
+                messageAnnotations.set(label, entry);
             }
         }
 
@@ -2616,6 +2759,7 @@ transition(busy, done, idle).
         loadDocs();
         updateTerminalHelp();
         updateCheckAvailability();
+        updateStateDirectionButtons();
         
         window.addEventListener('load', () => {
             appendPromptLine(document.getElementById('queryOutput'));
@@ -2690,7 +2834,7 @@ transition(busy, done, idle).
                 if (idx > 0) code += '\n\n';
                 code += "%%{init: {'stateDiagram': {'nodeSpacing': 300, 'rankSpacing': 240}}}%%\n";
                 code += `stateDiagram-v2\n`;
-                code += `    direction LR\n`;
+                code += `    direction ${stateMachineDirection}\n`;
                 code += `    %% ${actor.actor}\n`;
                 
                 if (actor.initial) {
@@ -2698,17 +2842,7 @@ transition(busy, done, idle).
                 }
                 
                 actor.transitions.forEach(t => {
-                    let label = sanitizeMermaidLabel(toUnicodeLogic(t.label));
-                    const prob = transitionProbabilities.get(transitionKey(t.from, t.label, t.to))
-                        || transitionProbabilitiesByLabel.get(t.label);
-                    if (/^(send_|recv_)/.test(t.label)) {
-                        const dest = actorFromState(t.to);
-                        label = `${label} ${dest}`;
-                    }
-                    if (prob && String(prob).trim() !== '') {
-                        const probLabel = sanitizeMermaidLabel(String(prob));
-                        label = `"${label}\\n${probLabel}"`;
-                    }
+                    const label = formatStateTransitionLabel(t);
                     code += `    ${t.from} --> ${t.to}: ${label}\n`;
                 });
             });
