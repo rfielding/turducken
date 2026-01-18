@@ -99,6 +99,9 @@ State Machines:
   prop(state, property).           % State satisfies property
   state_guard(state, guard_name).  % Optional guard for state
   transition_guard(from, label, to, guard_name). % Optional guard for transition
+  % NOTE: Avoid mixing transition/3 facts and rules. Prefer actor_transition/4 plus
+  % a derived transition/3 rule; if you need nested transitions, use nested_transition/3
+  % and fold them into a single transition/3 rule at the end.
 
 State/Actor Semantics:
   - Every state belongs to an actor. Use actor/1 or actor/2 plus actor_state/3 and actor_transition/4.
@@ -106,6 +109,14 @@ State/Actor Semantics:
   - Channel constraints apply: do not send on full channels or recv on empty channels.
   - For simulation only, a dice roll is made BEFORE selecting among matching states.
   - Use dice0(Low, High) inside guards to control probability of which next state is chosen.
+  - If you emit any of these predicates in multiple blocks, add discontiguous directives at the top:
+    :- discontiguous(doc/2).  :- discontiguous(actor/1).  :- discontiguous(actor/2).
+    :- discontiguous(actor_state/3).  :- discontiguous(actor_initial/2).
+    :- discontiguous(actor_transition/4).  :- discontiguous(state/2).
+    :- discontiguous(transition/3).  :- discontiguous(initial/1).
+    :- discontiguous(prop/2).  :- discontiguous(channel/2).
+    :- discontiguous(send/4).  :- discontiguous(recv/4).
+    :- discontiguous(message_format/2).  :- discontiguous(message/4).
 
 CSP Channels:
   channel(name, capacity).         % Declare buffered channel

@@ -47,6 +47,17 @@ func (e *Engine) loadCore() error {
 % accepting(State) - marks accepting state
 % state_guard(State, Guard) - optional guard name for a state (Guard/1 uses Dice)
 % transition_guard(From, Label, To, Guard) - optional guard for a transition (Guard/1)
+% Allow definitions to be scattered across generated + user code.
+:- discontiguous(state/2).
+:- discontiguous(transition/3).
+:- discontiguous(initial/1).
+:- discontiguous(accepting/1).
+:- discontiguous(actor/1).
+:- discontiguous(actor/2).
+:- discontiguous(actor_state/3).
+:- discontiguous(actor_initial/2).
+:- discontiguous(actor_transition/4).
+:- discontiguous(prop/2).
 
 % --- CTL Operators (Kripke structure based) ---
 % The model is defined by: state/2, transition/3, prop/2

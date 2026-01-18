@@ -566,6 +566,7 @@ transition(busy, done, idle).
                             <button class="btn btn-secondary example-btn" onclick="loadExample('yahalom')">Yahalom</button>
                             <button class="btn btn-secondary example-btn" onclick="loadExample('needham_schroeder')">Needham-Schroeder</button>
                             <button class="btn btn-secondary example-btn" onclick="loadExample('kerberos')">Kerberos</button>
+                            <button class="btn btn-secondary example-btn" onclick="loadExample('paxos')">Paxos</button>
                             <button class="btn btn-secondary example-btn" onclick="loadExample('bread_company')">Bread Company</button>
                         </div>
                     </div>
@@ -700,13 +701,18 @@ transition(busy, done, idle).
                 const data = await resp.json();
                 
                 if (data.success) {
-                    setStatus('Spec applied successfully!', 'success');
+                    if (data.fixed && data.source) {
+                        document.getElementById('specEditor').value = data.source;
+                        setStatus('Spec applied with fixes.', 'success');
+                    } else {
+                        setStatus('Spec applied successfully!', 'success');
+                    }
                     loadProperties();
                     loadDocs();  // Add this line
                     loadPromptPreview();
                     updateTerminalHelp();
                     updateCheckAvailability();
-                    updateTransitionProbabilities(source);
+                    updateTransitionProbabilities(data.source || source);
                     if (document.getElementById('tab-states').classList.contains('active')) {
                         renderStates();
                     }
@@ -1684,624 +1690,33 @@ transition(busy, done, idle).
             return html;
         }
         
-        // Example specifications
-        const examples = {
-            mutex: `% Mutual Exclusion Protocol
-                state(free, [available]).
-                state(locked, [busy]).
-                
-                initial(free).
-                
-                transition(free, acquire, locked).
-                transition(locked, release, free).
-                
-                prop(free, available).
-                prop(locked, busy).
-                
-                property(no_deadlock, 'Can always release', 'ag(ef(atom(available)))').`,
-                
-            channel: `% Buffered Channel (CSP style)
-                state(empty, [can_send]).
-                state(has_one, [can_send, can_recv]).
-                state(full, [can_recv]).
-                
-                initial(empty).
-                
-                transition(empty, send, has_one).
-                transition(has_one, send, full).
-                transition(full, recv, has_one).
-                transition(has_one, recv, empty).
-                
-                prop(empty, can_send).
-                prop(has_one, can_send).
-                prop(has_one, can_recv).
-                prop(full, can_recv).
-                
-                property(liveness, 'Can always send again', 'ag(ef(atom(can_send)))').`,
-                
-            sequence: `% Request-Response Protocol
-                channel(client_server, 1).
-                channel(server_db, 1).
-                
-                send(client_server, request, client_idle, client_waiting).
-                send(server_db, query, server_requesting, server_querying).
-                send(server_db, result, database_querying, database_idle).
-                send(client_server, response, server_responding, server_idle).
-                
-                recv(client_server, request, server_idle, server_requesting).
-                recv(server_db, query, database_idle, database_querying).
-                recv(server_db, result, server_querying, server_responding).
-                recv(client_server, response, client_waiting, client_idle).
-                
-                actor(client).
-                actor(server).
-                actor(database).
-                
-                actor_initial(client, client_idle).
-                actor_initial(server, server_idle).
-                actor_initial(database, database_idle).
-                
-                actor_state(client, client_idle, [ready]).
-                actor_state(client, client_waiting, [busy]).
-                actor_state(server, server_idle, [ready]).
-                actor_state(server, server_requesting, [busy]).
-                actor_state(server, server_querying, [busy]).
-                actor_state(server, server_responding, [busy]).
-                actor_state(database, database_idle, [ready]).
-                actor_state(database, database_querying, [busy]).
-                
-                actor_transition(client, client_idle, request, client_waiting).
-                actor_transition(client, client_waiting, response, client_idle).
-                actor_transition(server, server_idle, request, server_requesting).
-                actor_transition(server, server_requesting, query, server_querying).
-                actor_transition(server, server_querying, result, server_responding).
-                actor_transition(server, server_responding, response, server_idle).
-                actor_transition(database, database_idle, query, database_querying).
-                actor_transition(database, database_querying, result, database_idle).
-                
-                prop(State, Prop) :- actor_state(_, State, Props), member(Prop, Props).
-                initial(S) :- actor_initial(_, S).
-                transition(From, Label, To) :- actor_transition(_, From, Label, To).
-                
-                property(completes, 'Requests complete', 'ag(or(not(atom(busy)), af(atom(ready))))').`
-                ,
-            bread_company: `% Bread Company Operations
-                doc(title, 'Bread Company Operations').
-                doc(version, '0.1.0').
-                doc(author, 'Generated by LLM').
-                doc(overview, 'A bread company with production, logistics, retail, and customer demand.').
-                doc(description, 'Actors communicate via messages. Production and customer arrivals are probabilistic chance nodes. Pie/line charts should visualize message volume by sender.').
-                
-                doc(role_factory, 'Factory mixes, kneads, bakes, cools, and bags bread.').
-                doc(role_bakers, 'Bakers operate machines, knead dough, and manage oven loads.').
-                doc(role_truck, 'Truck loads bagged bread and delivers to the storefront.').
-                doc(role_storefront, 'Storefront receives bread, stocks racks, sells to customers, and manages aging inventory.').
-                doc(role_customers, 'Customers arrive stochastically and buy bread from the fresh rack.').
-                doc(role_charity, 'Charity rack receives bread older than 3 days.').
-                doc(role_accounting, 'Accounting tracks wages, revenue, and profitability.').
-                
-                doc(viz_statemachine, 'State machines show operational modes per actor. Chance states model probabilistic events.').
-                doc(viz_sequence, 'Sequence diagram shows a typical day: production -> delivery -> stocking -> customer sales -> accounting updates.').
-                doc(viz_pie, 'Pie chart shows message volume by sender (actor).').
-                doc(viz_line, 'Line chart shows cumulative messages by sender over sequence order.').
-                
-                actor(factory).
-                actor(bakers).
-                actor(truck).
-                actor(storefront).
-                actor(customers).
-                actor(charity).
-                actor(accounting).
-                
-                actor_initial(factory, factory_idle).
-                actor_initial(bakers, bakers_idle).
-                actor_initial(truck, truck_idle).
-                actor_initial(storefront, store_closed).
-                actor_initial(customers, customers_idle).
-                actor_initial(charity, charity_idle).
-                actor_initial(accounting, accounting_break_even).
-                
-                actor_state(factory, factory_idle, [ready]).
-                actor_state(factory, factory_chance_batch, [chance]).
-                actor_state(factory, factory_mixing, [in_progress]).
-                actor_state(factory, factory_kneading, [in_progress]).
-                actor_state(factory, factory_baking, [in_progress]).
-                actor_state(factory, factory_cooling, [in_progress]).
-                actor_state(factory, factory_bagging, [bagged_stock]).
-                actor_state(factory, factory_waiting_truck, [bagged_stock]).
-                
-                actor_state(bakers, bakers_idle, [available]).
-                actor_state(bakers, bakers_running_mixer, [busy]).
-                actor_state(bakers, bakers_kneading, [busy]).
-                actor_state(bakers, bakers_loading_oven, [busy]).
-                actor_state(bakers, bakers_unloading_oven, [busy]).
-                
-                actor_state(truck, truck_idle, [available]).
-                actor_state(truck, truck_loading, [busy]).
-                actor_state(truck, truck_in_transit, [busy]).
-                actor_state(truck, truck_unloading, [busy]).
-                
-                actor_state(storefront, store_closed, [closed]).
-                actor_state(storefront, store_open, [open]).
-                actor_state(storefront, store_stocking, [open]).
-                actor_state(storefront, store_fresh_rack_full, [fresh_stock]).
-                actor_state(storefront, store_fresh_rack_low, [fresh_stock, low_stock]).
-                actor_state(storefront, store_charity_rack, [has_charity_stock]).
-                actor_state(storefront, store_rotating_stock, [aging_stock]).
-                actor_state(storefront, store_sold_out, [no_stock]).
-                
-                actor_state(customers, customers_idle, [chance]).
-                actor_state(customers, customers_arriving_low, [arriving]).
-                actor_state(customers, customers_arriving_high, [arriving]).
-                actor_state(customers, customers_buying, [buying]).
-                
-                actor_state(charity, charity_idle, [ready]).
-                actor_state(charity, charity_receiving, [receiving]).
-                actor_state(charity, charity_stocked, [has_stock]).
-                
-                actor_state(accounting, accounting_break_even, [neutral]).
-                actor_state(accounting, accounting_profitable, [profitable]).
-                actor_state(accounting, accounting_loss, [loss]).
-                actor_state(accounting, accounting_payroll, [wages_due]).
-                actor_state(accounting, accounting_revenue, [revenue_in]).
-                
-                actor_transition(factory, factory_idle, start_day, factory_chance_batch).
-                actor_transition(factory, factory_chance_batch, batch_low, factory_mixing).
-                actor_transition(factory, factory_chance_batch, batch_high, factory_mixing).
-                actor_transition(factory, factory_mixing, mixed, factory_kneading).
-                actor_transition(factory, factory_kneading, kneaded, factory_baking).
-                actor_transition(factory, factory_baking, baked, factory_cooling).
-                actor_transition(factory, factory_cooling, cooled, factory_bagging).
-                actor_transition(factory, factory_bagging, bagged, factory_waiting_truck).
-                actor_transition(factory, factory_waiting_truck, loaded, factory_idle).
-                
-                actor_transition(bakers, bakers_idle, run_mixer, bakers_running_mixer).
-                actor_transition(bakers, bakers_running_mixer, dough_ready, bakers_kneading).
-                actor_transition(bakers, bakers_kneading, dough_kneaded, bakers_loading_oven).
-                actor_transition(bakers, bakers_loading_oven, oven_loaded, bakers_unloading_oven).
-                actor_transition(bakers, bakers_unloading_oven, oven_unloaded, bakers_idle).
-                
-                actor_transition(truck, truck_idle, arrive_factory, truck_loading).
-                actor_transition(truck, truck_loading, loaded_truck, truck_in_transit).
-                actor_transition(truck, truck_in_transit, arrive_store, truck_unloading).
-                actor_transition(truck, truck_unloading, unloaded_store, truck_idle).
-                
-                actor_transition(storefront, store_closed, open_store, store_open).
-                actor_transition(storefront, store_open, receive_delivery, store_stocking).
-                actor_transition(storefront, store_stocking, racks_full, store_fresh_rack_full).
-                actor_transition(storefront, store_fresh_rack_full, sell_bread, store_fresh_rack_low).
-                actor_transition(storefront, store_fresh_rack_low, sell_out, store_sold_out).
-                actor_transition(storefront, store_fresh_rack_low, restock, store_fresh_rack_full).
-                actor_transition(storefront, store_fresh_rack_full, rotate_stock, store_rotating_stock).
-                actor_transition(storefront, store_rotating_stock, moved_to_charity, store_charity_rack).
-                actor_transition(storefront, store_charity_rack, charity_rack_set, store_open).
-                actor_transition(storefront, store_sold_out, close_store, store_closed).
-                
-                actor_transition(customers, customers_idle, chance_arrival, customers_arriving_low).
-                actor_transition(customers, customers_idle, chance_arrival_peak, customers_arriving_high).
-                actor_transition(customers, customers_arriving_low, browse, customers_buying).
-                actor_transition(customers, customers_arriving_high, rush, customers_buying).
-                actor_transition(customers, customers_buying, checkout, customers_idle).
-                
-                actor_transition(charity, charity_idle, notify_pickup, charity_receiving).
-                actor_transition(charity, charity_receiving, stocked, charity_stocked).
-                actor_transition(charity, charity_stocked, clear_rack, charity_idle).
-                
-                actor_transition(accounting, accounting_break_even, record_wages, accounting_payroll).
-                actor_transition(accounting, accounting_payroll, wages_paid, accounting_loss).
-                actor_transition(accounting, accounting_loss, record_sales, accounting_revenue).
-                actor_transition(accounting, accounting_revenue, profit_high, accounting_profitable).
-                actor_transition(accounting, accounting_revenue, profit_low, accounting_break_even).
-                actor_transition(accounting, accounting_profitable, record_wages, accounting_payroll).
-                
-                msg_annotation(start_day, send, bakers).
-                msg_annotation(mixed, send, bakers).
-                msg_annotation(kneaded, send, bakers).
-                msg_annotation(baked, send, bakers).
-                msg_annotation(cooled, send, bakers).
-                msg_annotation(bagged, send, truck).
-                msg_annotation(loaded_truck, send, truck).
-                msg_annotation(arrive_store, send, storefront).
-                msg_annotation(receive_delivery, recv, truck).
-                msg_annotation(sell_bread, recv, customers).
-                msg_annotation(checkout, send, accounting).
-                msg_annotation(moved_to_charity, send, charity).
-                
-                channel(factory_bakers, 1).
-                channel(factory_truck, 1).
-                channel(truck_store, 1).
-                channel(store_customers, 1).
-                channel(store_accounting, 1).
-                channel(store_charity, 1).
-                
-                send(factory_bakers, start_day, factory_idle, factory_chance_batch).
-                send(factory_bakers, mixed, bakers_running_mixer, bakers_kneading).
-                send(factory_bakers, kneaded, bakers_kneading, bakers_loading_oven).
-                send(factory_bakers, baked, bakers_loading_oven, bakers_unloading_oven).
-                send(factory_bakers, cooled, bakers_unloading_oven, bakers_idle).
-                
-                send(factory_truck, bagged, factory_bagging, factory_waiting_truck).
-                send(factory_truck, loaded_truck, truck_loading, truck_in_transit).
-                
-                send(truck_store, deliver_bread, truck_in_transit, truck_unloading).
-                send(truck_store, receive_delivery, store_stocking, store_fresh_rack_full).
-                
-                send(store_customers, arrive, customers_idle, customers_arriving_low).
-                send(store_customers, offer_bread, store_fresh_rack_full, store_fresh_rack_low).
-                send(store_customers, purchase_8, customers_buying, customers_idle).
-                
-                send(store_accounting, record_sale, store_fresh_rack_low, store_fresh_rack_low).
-                
-                send(store_charity, move_old_stock, store_rotating_stock, store_charity_rack).
-                
-                recv(factory_bakers, start_day, bakers_idle, bakers_running_mixer).
-                recv(factory_bakers, mixed, factory_mixing, factory_kneading).
-                recv(factory_bakers, kneaded, factory_kneading, factory_baking).
-                recv(factory_bakers, baked, factory_baking, factory_cooling).
-                recv(factory_bakers, cooled, factory_cooling, factory_bagging).
-                
-                recv(factory_truck, bagged, truck_idle, truck_loading).
-                recv(factory_truck, loaded_truck, factory_waiting_truck, factory_idle).
-                
-                recv(truck_store, deliver_bread, store_open, store_stocking).
-                recv(truck_store, receive_delivery, truck_unloading, truck_idle).
-                
-                recv(store_customers, arrive, store_open, store_open).
-                recv(store_customers, offer_bread, customers_arriving_low, customers_buying).
-                recv(store_customers, purchase_8, store_fresh_rack_low, store_fresh_rack_low).
-                
-                recv(store_accounting, record_sale, accounting_loss, accounting_revenue).
-                
-                recv(store_charity, move_old_stock, charity_idle, charity_receiving).
-                
-                prop(State, Prop) :- actor_state(_, State, Props), member(Prop, Props).
-                initial(S) :- actor_initial(_, S).
-                transition(From, Label, To) :- actor_transition(_, From, Label, To).
-                
-                property(profitable_eventually, 'Business can reach profitability', 'ag(ef(atom(profitable)))').
-                property(avoid_permanent_stockout, 'Fresh rack not permanently empty', 'ag(ef(atom(fresh_stock)))').
-                property(charity_receives_old_stock, 'Old stock eventually moved to charity', 'ag(ef(atom(has_charity_stock)))').
-                property(wages_recorded, 'Payroll is eventually recorded', 'ag(ef(atom(wages_due)))').
-                property(open_store_reachable, 'Store can open from initial conditions', 'ag(ef(atom(open)))').`
-                ,
-            yahalom: `% Yahalom Key Exchange Protocol
-                doc(title, 'Yahalom Protocol').
-                doc(version, '0.1.0').
-                doc(author, 'Generated by LLM').
-                doc(overview, 'Three-party key exchange protocol with a trusted server.').
-                doc(description, 'Actors A and B use server S to establish a shared session key Kab.').
-                
-                doc(role_initiator, 'A initiates the run by sending a fresh nonce to B.').
-                doc(role_responder, 'B responds and relays A and fresh nonces to S.').
-                doc(role_server, 'S creates a session key and returns tickets for A and B.').
-                doc(vars, 'Na,Nb are nonces; Kab is a session key; ticket_b is a ticket encrypted for B (e.g., {Kab,A}_Kbs).').
-                doc(role_attacker, 'Attacker can steal tickets or forge them after compromising S.').
-                
-                doc(viz_sequence, 'Sequence is derived from send/recv on channels.').
-                doc(viz_statemachine, 'Explicit actor states make the protocol easy to diagram.').
-                
-                actor(a).
-                actor(b).
-                actor(s).
-                actor(attacker).
-                
-                actor_initial(a, a_idle).
-                actor_initial(b, b_idle).
-                actor_initial(s, s_idle).
-                actor_initial(attacker, attacker_idle).
-                
-                actor_state(a, a_idle, [ready]).
-                actor_state(a, a_sent_na, [waiting]).
-                actor_state(a, a_got_ticket, [has_ticket]).
-                actor_state(a, a_established, [kab_established]).
-                
-                actor_state(b, b_idle, [ready]).
-                actor_state(b, b_got_na, [waiting]).
-                actor_state(b, b_sent_to_s, [waiting]).
-                actor_state(b, b_established, [kab_established]).
-                
-                actor_state(s, s_idle, [ready]).
-                actor_state(s, s_received, [processing]).
-                actor_state(s, s_responded, [responded]).
-                
-                actor_state(attacker, attacker_idle, [ready]).
-                actor_state(attacker, attacker_got_ticket, [attacker_has_ticket]).
-                actor_state(attacker, attacker_got_kab, [attacker_has_kab]).
-                actor_state(attacker, attacker_compromised, [attacker_can_forge]).
-                
-                actor_transition(a, a_idle, send_ab_na, a_sent_na).
-                actor_transition(a, a_sent_na, recv_s_to_a, a_got_ticket).
-                actor_transition(a, a_got_ticket, send_ticket_to_b, a_established).
-                
-                actor_transition(b, b_idle, recv_ab_na, b_got_na).
-                actor_transition(b, b_got_na, send_to_s, b_sent_to_s).
-                actor_transition(b, b_sent_to_s, recv_a_ticket, b_established).
-                
-                actor_transition(s, s_idle, recv_b_to_s, s_received).
-                actor_transition(s, s_received, send_s_to_a, s_responded).
-                actor_transition(s, s_responded, reset, s_idle).
-                
-                actor_transition(attacker, attacker_idle, steal_ticket, attacker_got_ticket).
-                actor_transition(attacker, attacker_got_ticket, use_ticket, attacker_got_kab).
-                actor_transition(attacker, attacker_idle, compromise_s, attacker_compromised).
-                actor_transition(attacker, attacker_compromised, forge_ticket, attacker_got_ticket).
-                
-                transition_guard(attacker_idle, steal_ticket, attacker_got_ticket, chance_steal).
-                transition_guard(attacker_idle, compromise_s, attacker_compromised, chance_compromise).
-                
-                transition_prob(attacker_idle, steal_ticket, attacker_got_ticket, 0.7).
-                transition_prob(attacker_idle, compromise_s, attacker_compromised, 0.3).
-                
-                chance_steal :- dice0(0.0, 0.7).
-                chance_compromise :- dice0(0.7, 1.0).
-                
-                transition_guard(attacker_idle, steal_ticket, attacker_got_ticket, chance_steal).
-                transition_guard(attacker_idle, compromise_s, attacker_compromised, chance_compromise).
-                
-                transition_prob(attacker_idle, steal_ticket, attacker_got_ticket, 0.7).
-                transition_prob(attacker_idle, compromise_s, attacker_compromised, 0.3).
-                
-                chance_steal :- dice0(0.0, 0.7).
-                chance_compromise :- dice0(0.7, 1.0).
-                
-                channel(a_b, 1).
-                channel(b_s, 1).
-                channel(s_a, 1).
-                channel(a_b_ticket, 1).
-                
-                message_format(na, 'A,Na').
-                message_format(a_na_nb, 'A,Na,Nb').
-                message_format(kab_ticket, 'Kab,ticket_b,Nb').
-                
-                send(a_b, na, a_idle, a_sent_na).
-                send(b_s, a_na_nb, b_got_na, b_sent_to_s).
-                send(s_a, kab_ticket, s_received, s_responded).
-                send(a_b_ticket, kab_ticket, a_got_ticket, a_established).
-                
-                recv(a_b, na, b_idle, b_got_na).
-                recv(b_s, a_na_nb, s_idle, s_received).
-                recv(s_a, kab_ticket, a_sent_na, a_got_ticket).
-                recv(a_b_ticket, kab_ticket, b_sent_to_s, b_established).
-                
-                prop(State, Prop) :- actor_state(_, State, Props), member(Prop, Props).
-                initial(S) :- actor_initial(_, S).
-                transition(From, Label, To) :- actor_transition(_, From, Label, To).
-                
-                property(a_establishes_key, 'A can establish Kab', 'ag(ef(atom(kab_established)))').
-                property(b_establishes_key, 'B can establish Kab', 'ag(ef(atom(kab_established)))').
-                property(attacker_can_get_ticket, 'Attacker can obtain a ticket', 'ef(atom(attacker_has_ticket))').
-                property(attacker_can_get_kab, 'Attacker can obtain Kab', 'ef(atom(attacker_has_kab))').
-                property(attacker_never_gets_kab, 'Attacker never learns Kab', 'ag(not(atom(attacker_has_kab)))').`
-                ,
-            needham_schroeder: `% Needham-Schroeder (Symmetric Key) Protocol
-                doc(title, 'Needham-Schroeder (Symmetric Key)').
-                doc(version, '0.1.0').
-                doc(author, 'Generated by LLM').
-                doc(overview, 'A and B use a trusted server S to establish a session key Kab.').
-                doc(description, 'Sequence derived from send/recv on channels.').
-                
-                doc(role_initiator, 'A initiates by requesting a session key for B.').
-                doc(role_responder, 'B completes challenge-response with A.').
-                doc(role_server, 'S issues Kab and a ticket for B.').
-                doc(vars, 'Na,Nb are nonces; Kab is a session key; ticket_b is a ticket encrypted for B (e.g., {Kab,A}_Kbs).').
-                doc(role_attacker, 'Attacker can steal tickets or forge them after compromising S.').
-                
-                actor(a).
-                actor(b).
-                actor(s).
-                actor(attacker).
-                
-                actor_initial(a, a_idle).
-                actor_initial(b, b_idle).
-                actor_initial(s, s_idle).
-                actor_initial(attacker, attacker_idle).
-                
-                actor_state(a, a_idle, [ready]).
-                actor_state(a, a_sent_req, [waiting]).
-                actor_state(a, a_got_ticket, [has_ticket]).
-                actor_state(a, a_sent_ticket, [waiting]).
-                actor_state(a, a_established, [kab_established]).
-                
-                actor_state(b, b_idle, [ready]).
-                actor_state(b, b_got_ticket, [has_ticket]).
-                actor_state(b, b_sent_nb, [waiting]).
-                actor_state(b, b_established, [kab_established]).
-                
-                actor_state(s, s_idle, [ready]).
-                actor_state(s, s_received, [processing]).
-                actor_state(s, s_responded, [responded]).
-                
-                actor_state(attacker, attacker_idle, [ready]).
-                actor_state(attacker, attacker_got_ticket, [attacker_has_ticket]).
-                actor_state(attacker, attacker_got_kab, [attacker_has_kab]).
-                actor_state(attacker, attacker_compromised, [attacker_can_forge]).
-                
-                actor_transition(a, a_idle, send_req, a_sent_req).
-                actor_transition(a, a_sent_req, recv_ticket, a_got_ticket).
-                actor_transition(a, a_got_ticket, send_ticket, a_sent_ticket).
-                actor_transition(a, a_sent_ticket, recv_nb, a_established).
-                
-                actor_transition(b, b_idle, recv_ticket, b_got_ticket).
-                actor_transition(b, b_got_ticket, send_nb, b_sent_nb).
-                actor_transition(b, b_sent_nb, recv_nb_ack, b_established).
-                
-                actor_transition(s, s_idle, recv_req, s_received).
-                actor_transition(s, s_received, send_ticket, s_responded).
-                actor_transition(s, s_responded, reset, s_idle).
-                
-                actor_transition(attacker, attacker_idle, steal_ticket, attacker_got_ticket).
-                actor_transition(attacker, attacker_got_ticket, use_ticket, attacker_got_kab).
-                actor_transition(attacker, attacker_idle, compromise_s, attacker_compromised).
-                actor_transition(attacker, attacker_compromised, forge_ticket, attacker_got_ticket).
-                
-                channel(a_s, 1).
-                channel(s_a, 1).
-                channel(a_b, 1).
-                channel(b_a, 1).
-                
-                message_format(req_ab_na, 'A,B,Na').
-                message_format(ticket_kab, 'Kab,ticket_b').
-                message_format(nb, 'Nb').
-                message_format(nb_ack, 'Nb-1').
-                
-                send(a_s, req_ab_na, a_idle, a_sent_req).
-                send(s_a, ticket_kab, s_received, s_responded).
-                send(a_b, ticket_kab, a_got_ticket, a_sent_ticket).
-                send(b_a, nb, b_got_ticket, b_sent_nb).
-                send(a_b, nb_ack, a_sent_ticket, a_established).
-                
-                recv(a_s, req_ab_na, s_idle, s_received).
-                recv(s_a, ticket_kab, a_sent_req, a_got_ticket).
-                recv(a_b, ticket_kab, b_idle, b_got_ticket).
-                recv(b_a, nb, a_sent_ticket, a_established).
-                recv(a_b, nb_ack, b_sent_nb, b_established).
-                
-                prop(State, Prop) :- actor_state(_, State, Props), member(Prop, Props).
-                initial(S) :- actor_initial(_, S).
-                transition(From, Label, To) :- actor_transition(_, From, Label, To).
-                
-                property(a_establishes_key, 'A can establish Kab', 'ag(ef(atom(kab_established)))').
-                property(b_establishes_key, 'B can establish Kab', 'ag(ef(atom(kab_established)))').
-                property(attacker_can_get_ticket, 'Attacker can obtain a ticket', 'ef(atom(attacker_has_ticket))').
-                property(attacker_can_get_kab, 'Attacker can obtain Kab', 'ef(atom(attacker_has_kab))').
-                property(attacker_never_gets_kab, 'Attacker never learns Kab', 'ag(not(atom(attacker_has_kab)))').`
-                ,
-            kerberos: `% Kerberos (Simplified)
-                doc(title, 'Kerberos (Simplified)').
-                doc(version, '0.1.0').
-                doc(author, 'Generated by LLM').
-                doc(overview, 'Client obtains tickets from AS and TGS to access a service.').
-                doc(description, 'Sequence derived from send/recv on channels.').
-                
-                doc(role_client, 'Client requests tickets and authenticates to the service.').
-                doc(role_as, 'Authentication Server issues a TGT.').
-                doc(role_tgs, 'Ticket Granting Server issues service tickets.').
-                doc(role_service, 'Service accepts the client ticket.').
-                doc(vars, 'TGT is the ticket-granting ticket; Kc_tgs is client-TGS session key; Kc_svc is client-service session key; Auth is an authenticator; SvcTicket is the service ticket.').
-                doc(role_attacker, 'Attacker can steal tickets or forge them after compromising TGS.').
-                
-                actor(client).
-                actor(as).
-                actor(tgs).
-                actor(service).
-                actor(attacker).
-                
-                actor_initial(client, c_idle).
-                actor_initial(as, as_idle).
-                actor_initial(tgs, tgs_idle).
-                actor_initial(service, s_idle).
-                actor_initial(attacker, attacker_idle).
-                
-                actor_state(client, c_idle, [ready]).
-                actor_state(client, c_sent_as_req, [waiting]).
-                actor_state(client, c_got_tgt, [has_tgt]).
-                actor_state(client, c_sent_tgs_req, [waiting]).
-                actor_state(client, c_got_svc_ticket, [has_ticket]).
-                actor_state(client, c_authenticated, [authed]).
-                
-                actor_state(as, as_idle, [ready]).
-                actor_state(as, as_received, [processing]).
-                actor_state(as, as_responded, [responded]).
-                
-                actor_state(tgs, tgs_idle, [ready]).
-                actor_state(tgs, tgs_received, [processing]).
-                actor_state(tgs, tgs_responded, [responded]).
-                
-                actor_state(service, s_idle, [ready]).
-                actor_state(service, s_received, [processing]).
-                actor_state(service, s_accepted, [authed]).
-                
-                actor_state(attacker, attacker_idle, [ready]).
-                actor_state(attacker, attacker_got_tgt, [attacker_has_tgt]).
-                actor_state(attacker, attacker_got_ticket, [attacker_has_ticket]).
-                actor_state(attacker, attacker_authed, [attacker_authed]).
-                actor_state(attacker, attacker_compromised, [attacker_can_forge]).
-                
-                actor_transition(client, c_idle, send_as_req, c_sent_as_req).
-                actor_transition(client, c_sent_as_req, recv_as_rep, c_got_tgt).
-                actor_transition(client, c_got_tgt, send_tgs_req, c_sent_tgs_req).
-                actor_transition(client, c_sent_tgs_req, recv_tgs_rep, c_got_svc_ticket).
-                actor_transition(client, c_got_svc_ticket, send_ap_req, c_authenticated).
-                
-                actor_transition(as, as_idle, recv_as_req, as_received).
-                actor_transition(as, as_received, send_as_rep, as_responded).
-                actor_transition(as, as_responded, reset, as_idle).
-                
-                actor_transition(tgs, tgs_idle, recv_tgs_req, tgs_received).
-                actor_transition(tgs, tgs_received, send_tgs_rep, tgs_responded).
-                actor_transition(tgs, tgs_responded, reset, tgs_idle).
-                
-                actor_transition(service, s_idle, recv_ap_req, s_received).
-                actor_transition(service, s_received, send_ap_rep, s_accepted).
-                actor_transition(service, s_accepted, reset, s_idle).
-                
-                actor_transition(attacker, attacker_idle, steal_tgt, attacker_got_tgt).
-                actor_transition(attacker, attacker_got_tgt, use_tgt, attacker_got_ticket).
-                actor_transition(attacker, attacker_idle, steal_ticket, attacker_got_ticket).
-                actor_transition(attacker, attacker_got_ticket, use_ticket, attacker_authed).
-                actor_transition(attacker, attacker_idle, compromise_tgs, attacker_compromised).
-                actor_transition(attacker, attacker_compromised, forge_ticket, attacker_got_ticket).
-                
-                transition_guard(attacker_idle, steal_tgt, attacker_got_tgt, chance_steal_tgt).
-                transition_guard(attacker_idle, steal_ticket, attacker_got_ticket, chance_steal_ticket).
-                transition_guard(attacker_idle, compromise_tgs, attacker_compromised, chance_compromise).
-                
-                transition_prob(attacker_idle, steal_tgt, attacker_got_tgt, 0.5).
-                transition_prob(attacker_idle, steal_ticket, attacker_got_ticket, 0.3).
-                transition_prob(attacker_idle, compromise_tgs, attacker_compromised, 0.2).
-                
-                chance_steal_tgt :- dice0(0.0, 0.5).
-                chance_steal_ticket :- dice0(0.5, 0.8).
-                chance_compromise :- dice0(0.8, 1.0).
-                
-                channel(c_as, 1).
-                channel(as_c, 1).
-                channel(c_tgs, 1).
-                channel(tgs_c, 1).
-                channel(c_svc, 1).
-                channel(svc_c, 1).
-                
-                message_format(as_req, 'C').
-                message_format(as_rep, 'TGT,Kc_tgs').
-                message_format(tgs_req, 'TGT,Auth').
-                message_format(tgs_rep, 'SvcTicket,Kc_svc').
-                message_format(ap_req, 'SvcTicket,Auth').
-                message_format(ap_rep, 'Ack').
-                
-                send(c_as, as_req, c_idle, c_sent_as_req).
-                send(as_c, as_rep, as_received, as_responded).
-                send(c_tgs, tgs_req, c_got_tgt, c_sent_tgs_req).
-                send(tgs_c, tgs_rep, tgs_received, tgs_responded).
-                send(c_svc, ap_req, c_got_svc_ticket, c_authenticated).
-                send(svc_c, ap_rep, s_received, s_accepted).
-                
-                recv(c_as, as_req, as_idle, as_received).
-                recv(as_c, as_rep, c_sent_as_req, c_got_tgt).
-                recv(c_tgs, tgs_req, tgs_idle, tgs_received).
-                recv(tgs_c, tgs_rep, c_sent_tgs_req, c_got_svc_ticket).
-                recv(c_svc, ap_req, s_idle, s_received).
-                recv(svc_c, ap_rep, c_authenticated, c_authenticated).
-                
-                prop(State, Prop) :- actor_state(_, State, Props), member(Prop, Props).
-                initial(S) :- actor_initial(_, S).
-                transition(From, Label, To) :- actor_transition(_, From, Label, To).
-                
-                property(client_authenticates, 'Client can authenticate to service', 'ag(ef(atom(authed)))').
-                property(attacker_can_get_ticket, 'Attacker can obtain a service ticket', 'ef(atom(attacker_has_ticket))').
-                property(attacker_can_authenticate, 'Attacker can authenticate to service', 'ef(atom(attacker_authed))').
-                property(attacker_never_authenticates, 'Attacker never authenticates', 'ag(not(atom(attacker_authed)))').`
-        };
-        
-        function loadExample(name) {
-            document.getElementById('specEditor').value = examples[name];
+        // Example specifications loaded from disk.
+        async function loadExample(name) {
+            const editor = document.getElementById('specEditor');
+            if (!editor) {
+                return;
+            }
+            try {
+                const resp = await fetch(`/api/examples?name=${encodeURIComponent(name)}`);
+                const data = await resp.json();
+                if (data && data.success && typeof data.source === 'string') {
+                    editor.value = data.source;
+                    switchTab('spec');
+                    return;
+                }
+                editor.value = `% Failed to load example "${name}".`;
+            } catch (_err) {
+                editor.value = `% Failed to load example "${name}".`;
+            }
             switchTab('spec');
         }
 
         async function loadExampleAndApply(name) {
-            loadExample(name);
+            await loadExample(name);
             await applySpec();
             switchTab('states');
         }
+
 
         function toUnicodeLogic(text) {
             if (!text) {
@@ -2512,8 +1927,9 @@ transition(busy, done, idle).
                 const listDiv = document.getElementById('propertyList');
                 if (data.success && data.properties && data.properties.length > 0) {
                     const input = document.getElementById('propertyInput');
-                    if (input && data.properties[0].formula) {
-                        input.placeholder = data.properties[0].formula;
+                    const example = data.properties.find(p => p.formula)?.formula || '';
+                    if (input && example) {
+                        input.placeholder = example;
                     }
                     listDiv.innerHTML = data.properties.map(p => {
                         let statusIcon = '';
@@ -2696,8 +2112,11 @@ transition(busy, done, idle).
         });
         
         // Keyboard shortcuts
-        document.getElementById('queryOutput').addEventListener('click', () => {
-            focusTerminalInput(document.getElementById('queryOutput'));
+        document.getElementById('queryOutput').addEventListener('click', (e) => {
+            const target = e.target;
+            if (target && (target.classList.contains('terminal-input') || target.classList.contains('terminal-prompt'))) {
+                focusTerminalInput(document.getElementById('queryOutput'));
+            }
         });
         
         document.getElementById('propertyInput').addEventListener('keydown', (e) => {

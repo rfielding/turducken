@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -136,6 +137,7 @@ func (s *Server) ListenAndServe(addr string) error {
 	mux.HandleFunc("/api/docs", s.handleDocs)
 	mux.HandleFunc("/api/actors", s.handleActors)
 	mux.HandleFunc("/api/predicates", s.handlePredicates)
+	mux.HandleFunc("/api/examples", s.handleExamples)
 	mux.HandleFunc("/api/system-prompt", s.handleSystemPrompt)
 	mux.HandleFunc("/api/metrics", s.handleMetrics)
 	mux.HandleFunc("/api/openapi", s.handleOpenAPI)
@@ -184,6 +186,27 @@ func (s *Server) handleSpec(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := s.engine.LoadSpec(req.Source); err != nil {
+			fixedSource, fixed := autoFixSpec(req.Source)
+			if fixed {
+				if err := s.engine.Reset(); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				if err := s.engine.AssertTurduckenVersion(s.version); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				if err := s.engine.LoadSpec(fixedSource); err == nil {
+					s.runAndCacheSimulation(1000)
+					json.NewEncoder(w).Encode(map[string]interface{}{
+						"success": true,
+						"fixed":   true,
+						"source":  fixedSource,
+					})
+					return
+				}
+			}
+
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"success":    false,
 				"error":      err.Error(),
@@ -205,6 +228,40 @@ func (s *Server) handleSpec(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+func autoFixSpec(source string) (string, bool) {
+	changed := false
+	lines := strings.Split(source, "\n")
+	dynamicRe := regexp.MustCompile(`^\s*:-\s*dynamic\s+([A-Za-z0-9_\/]+)\s*\.\s*(%.*)?$`)
+	discontigRe := regexp.MustCompile(`^\s*:-\s*discontiguous\s+([A-Za-z0-9_\/]+)\s*\.\s*(%.*)?$`)
+
+	for i, line := range lines {
+		if dynamicRe.MatchString(line) {
+			m := dynamicRe.FindStringSubmatch(line)
+			comment := ""
+			if len(m) > 2 && m[2] != "" {
+				comment = " " + m[2]
+			}
+			lines[i] = fmt.Sprintf(":- dynamic(%s).%s", m[1], comment)
+			changed = true
+			continue
+		}
+		if discontigRe.MatchString(line) {
+			m := discontigRe.FindStringSubmatch(line)
+			comment := ""
+			if len(m) > 2 && m[2] != "" {
+				comment = " " + m[2]
+			}
+			lines[i] = fmt.Sprintf(":- discontiguous(%s).%s", m[1], comment)
+			changed = true
+		}
+	}
+
+	if !changed {
+		return source, false
+	}
+	return strings.Join(lines, "\n"), true
 }
 
 // handleQuery executes a raw Prolog query
@@ -847,6 +904,49 @@ func (s *Server) handlePredicates(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success":    true,
 		"predicates": preds,
+	})
+}
+
+// handleExamples serves example specs from disk.
+func (s *Server) handleExamples(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	name := r.URL.Query().Get("name")
+	if name == "" {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "missing example name",
+		})
+		return
+	}
+
+	if strings.Contains(name, "..") || strings.ContainsAny(name, `/\`) {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "invalid example name",
+		})
+		return
+	}
+
+	path := filepath.Join("specs", name+".pl")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"source":  string(content),
+		"name":    name,
 	})
 }
 
