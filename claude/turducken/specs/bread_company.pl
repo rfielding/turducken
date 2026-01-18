@@ -24,6 +24,14 @@ doc(viz_sequence, 'Sequence diagram shows a typical day: production -> delivery 
 doc(viz_pie, 'Pie chart shows message volume by sender (actor).').
 doc(viz_line, 'Line chart shows cumulative messages by sender over sequence order.').
 
+% === LINE CHART OPTIONS ===
+line_chart_option(simulation, rate, 50).
+line_series_source(revenue, label, record_sales).
+line_series_source(wages, label, record_wages).
+line_series(profit, sub, revenue, wages).
+line_chart(simulation, 'Message Rates', [factory, bakers, truck, storefront, customers, charity, accounting]).
+line_chart(simulation, 'Profit', [profit]).
+
 % === ACTORS ===
 actor(factory).
 actor(bakers).
