@@ -717,6 +717,9 @@ transition(busy, done, idle).
         const transitionProbabilitiesByLabel = new Map();
         const messageAnnotations = new Map();
         const messagePeers = new Map();
+        const terminalHistory = [];
+        let terminalHistoryIndex = 0;
+        let terminalHistoryDraft = '';
         let stateMachineDirection = 'TB';
         let showMermaidSource = true;
         
@@ -828,6 +831,12 @@ transition(busy, done, idle).
                 appendTerminalLine(output, 'Enter a query', 'var(--accent-yellow)');
                 return;
             }
+
+            if (terminalHistory.length === 0 || terminalHistory[terminalHistory.length - 1] !== command) {
+                terminalHistory.push(command);
+            }
+            terminalHistoryIndex = terminalHistory.length;
+            terminalHistoryDraft = '';
 
             removeTrailingPrompt(output);
             appendTerminalLine(output, `| ?- ${rawQuery.trim()}`, 'var(--accent-blue)');
@@ -1042,6 +1051,18 @@ transition(busy, done, idle).
             return input.textContent.trim();
         }
 
+        function setTerminalInput(output, value) {
+            if (!output) {
+                return;
+            }
+            const input = output.querySelector('.terminal-input');
+            if (!input) {
+                return;
+            }
+            input.textContent = value || '';
+            focusTerminalInput(output);
+        }
+
         function bindTerminalInput(input) {
             if (!input) {
                 return;
@@ -1050,6 +1071,29 @@ transition(busy, done, idle).
                 if (e.key === 'Enter') {
                     e.preventDefault();
                     runQuery();
+                    return;
+                }
+                if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    const output = document.getElementById('queryOutput');
+                    if (!output || terminalHistory.length === 0) {
+                        return;
+                    }
+                    if (terminalHistoryIndex === terminalHistory.length) {
+                        terminalHistoryDraft = input.textContent;
+                    }
+                    if (e.key === 'ArrowUp') {
+                        terminalHistoryIndex = Math.max(0, terminalHistoryIndex - 1);
+                        setTerminalInput(output, terminalHistory[terminalHistoryIndex]);
+                    } else {
+                        if (terminalHistoryIndex < terminalHistory.length - 1) {
+                            terminalHistoryIndex += 1;
+                            setTerminalInput(output, terminalHistory[terminalHistoryIndex]);
+                        } else {
+                            terminalHistoryIndex = terminalHistory.length;
+                            setTerminalInput(output, terminalHistoryDraft);
+                        }
+                    }
                     return;
                 }
                 if (e.key === 'Backspace') {
