@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"math/rand"
 	"net/http"
 	"os"
@@ -45,6 +46,16 @@ type TimePoint struct {
 	Time    time.Time `json:"time"`
 	Counter string    `json:"counter"`
 	Value   int64     `json:"value"`
+}
+
+type probRange struct {
+	Low  float64
+	High float64
+}
+
+type transitionProbData struct {
+	byTransition map[string]probRange
+	byFrom       map[string]bool
 }
 
 func (s *Server) incCounter(name string) {
@@ -115,6 +126,9 @@ func New(specFile string, version string) (*Server, error) {
 		if err := engine.LoadSpec(string(content)); err != nil {
 			return nil, fmt.Errorf("loading spec: %w", err)
 		}
+		if err := validateTransitionProbabilities(context.Background(), engine); err != nil {
+			return nil, err
+		}
 		s.runAndCacheSimulation(1000)
 	}
 
@@ -176,6 +190,17 @@ func (s *Server) handleSpec(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		prevSource := s.engine.GetSource()
+		restorePrev := func() {
+			if prevSource == "" {
+				return
+			}
+			_ = s.engine.Reset()
+			_ = s.engine.AssertTurduckenVersion(s.version)
+			_ = s.engine.LoadSpec(prevSource)
+			s.runAndCacheSimulation(1000)
+		}
+
 		// Reset and reload
 		if err := s.engine.Reset(); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -197,6 +222,15 @@ func (s *Server) handleSpec(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				if err := s.engine.LoadSpec(fixedSource); err == nil {
+					if err := validateTransitionProbabilities(context.Background(), s.engine); err != nil {
+						restorePrev()
+						json.NewEncoder(w).Encode(map[string]interface{}{
+							"success": false,
+							"error":   err.Error(),
+							"source":  req.Source,
+						})
+						return
+					}
 					s.runAndCacheSimulation(1000)
 					json.NewEncoder(w).Encode(map[string]interface{}{
 						"success": true,
@@ -212,6 +246,16 @@ func (s *Server) handleSpec(w http.ResponseWriter, r *http.Request) {
 				"error":      err.Error(),
 				"source":     req.Source,
 				"canAutoFix": true,
+			})
+			return
+		}
+
+		if err := validateTransitionProbabilities(context.Background(), s.engine); err != nil {
+			restorePrev()
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"error":   err.Error(),
+				"source":  req.Source,
 			})
 			return
 		}
@@ -1033,6 +1077,11 @@ func (s *Server) runAndCacheSimulation(steps int) {
 		return
 	}
 
+	probData, err := buildTransitionProbData(s.engine.GetSource(), sm)
+	if err != nil {
+		log.Printf("transition_prob validation error: %v", err)
+	}
+
 	// Build transition map for quick lookup
 	transitionMap := make(map[string][]prolog.Transition)
 	for _, t := range sm.Transitions {
@@ -1062,7 +1111,7 @@ func (s *Server) runAndCacheSimulation(steps int) {
 		var possibleTransitions []prolog.Transition
 		for _, state := range currentStates {
 			for _, t := range transitionMap[state] {
-				if s.transitionAllowed(ctx, state, t) {
+				if s.transitionAllowed(ctx, state, t, dice, probData) {
 					possibleTransitions = append(possibleTransitions, t)
 				}
 			}
@@ -1100,12 +1149,22 @@ func (s *Server) runAndCacheSimulation(steps int) {
 	s.cachedSimulation = &result
 }
 
-func (s *Server) transitionAllowed(ctx context.Context, state string, t prolog.Transition) bool {
+func (s *Server) transitionAllowed(ctx context.Context, state string, t prolog.Transition, dice float64, probData *transitionProbData) bool {
 	if !s.stateGuardSatisfied(ctx, state) {
 		return false
 	}
 	if !s.transitionGuardSatisfied(ctx, t) {
 		return false
+	}
+	if probData != nil && probData.byFrom[t.From] {
+		key := transitionKey(t.From, t.Label, t.To)
+		rng, ok := probData.byTransition[key]
+		if !ok {
+			return false
+		}
+		if dice < rng.Low || dice >= rng.High {
+			return false
+		}
 	}
 	return true
 }
@@ -1155,6 +1214,139 @@ func (s *Server) setDiceValue(ctx context.Context, value float64) {
 
 func (s *Server) clearDiceValue(ctx context.Context) {
 	_, _ = s.engine.QueryOne(ctx, "retractall(dice0_value(_)).")
+}
+
+func validateTransitionProbabilities(ctx context.Context, engine *prolog.Engine) error {
+	sm, err := engine.GetStateMachine(ctx)
+	if err != nil {
+		return fmt.Errorf("transition_prob validation: %w", err)
+	}
+	_, err = buildTransitionProbData(engine.GetSource(), sm)
+	return err
+}
+
+type probEntry struct {
+	from  string
+	label string
+	to    string
+	prob  float64
+}
+
+func buildTransitionProbData(source string, sm *prolog.StateMachine) (*transitionProbData, error) {
+	entries, err := parseTransitionProbabilities(source)
+	if err != nil {
+		return nil, err
+	}
+	if len(entries) == 0 {
+		return nil, nil
+	}
+
+	transitionSet := make(map[string]bool)
+	transitionsByFrom := make(map[string][]prolog.Transition)
+	if sm != nil {
+		for _, t := range sm.Transitions {
+			key := transitionKey(t.From, t.Label, t.To)
+			transitionSet[key] = true
+			transitionsByFrom[t.From] = append(transitionsByFrom[t.From], t)
+		}
+	}
+
+	ranges := make(map[string]probRange)
+	byFrom := make(map[string]bool)
+	acc := make(map[string]*probRange)
+	totals := make(map[string]float64)
+
+	for _, entry := range entries {
+		key := transitionKey(entry.from, entry.label, entry.to)
+		if _, exists := ranges[key]; exists {
+			return nil, fmt.Errorf("transition_prob duplicate for %s", key)
+		}
+		if sm != nil && !transitionSet[key] {
+			return nil, fmt.Errorf("transition_prob references missing transition %s", key)
+		}
+		stateAcc := acc[entry.from]
+		if stateAcc == nil {
+			stateAcc = &probRange{}
+			acc[entry.from] = stateAcc
+		}
+		low := stateAcc.High
+		high := low + entry.prob
+		stateAcc.High = high
+		totals[entry.from] += entry.prob
+		ranges[key] = probRange{Low: low, High: high}
+		byFrom[entry.from] = true
+	}
+
+	const tol = 1e-6
+	for from, total := range totals {
+		if math.Abs(1.0-total) > tol {
+			return nil, fmt.Errorf("transition_prob totals for %s must sum to 1.0 (got %.6f)", from, total)
+		}
+	}
+
+	if sm != nil {
+		for from, transitions := range transitionsByFrom {
+			if !byFrom[from] {
+				continue
+			}
+			for _, t := range transitions {
+				key := transitionKey(t.From, t.Label, t.To)
+				if _, ok := ranges[key]; !ok {
+					return nil, fmt.Errorf("transition_prob missing for transition %s --%s--> %s", t.From, t.Label, t.To)
+				}
+			}
+		}
+	}
+
+	return &transitionProbData{
+		byTransition: ranges,
+		byFrom:       byFrom,
+	}, nil
+}
+
+func parseTransitionProbabilities(source string) ([]probEntry, error) {
+	re := regexp.MustCompile(`transition_prob\(\s*([^,]+)\s*,\s*([^,]+)\s*,\s*([^,]+)\s*,\s*([^)]+)\)\s*\.`)
+	matches := re.FindAllStringSubmatch(source, -1)
+	if len(matches) == 0 {
+		return nil, nil
+	}
+	entries := make([]probEntry, 0, len(matches))
+	for _, match := range matches {
+		if len(match) < 5 {
+			continue
+		}
+		from := cleanPrologAtom(match[1])
+		label := cleanPrologAtom(match[2])
+		to := cleanPrologAtom(match[3])
+		value := strings.TrimSpace(match[4])
+		prob, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			return nil, fmt.Errorf("transition_prob parse error for %s: %w", value, err)
+		}
+		if prob < 0.0 || prob > 1.0 {
+			return nil, fmt.Errorf("transition_prob out of range for %s (%f)", from, prob)
+		}
+		entries = append(entries, probEntry{
+			from:  from,
+			label: label,
+			to:    to,
+			prob:  prob,
+		})
+	}
+	return entries, nil
+}
+
+func cleanPrologAtom(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if len(trimmed) >= 2 && trimmed[0] == '\'' && trimmed[len(trimmed)-1] == '\'' {
+		inner := trimmed[1 : len(trimmed)-1]
+		return strings.ReplaceAll(inner, "''", "'")
+	}
+	return trimmed
+}
+
+func transitionKey(from, label, to string) string {
+	return from + "|" + label + "|" + to
 }
 
 func prologAtom(value string) string {

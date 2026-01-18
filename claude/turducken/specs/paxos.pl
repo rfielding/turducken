@@ -46,6 +46,9 @@ doc(viz_pie, 'The Pie Charts show distribution of transitions by type, source ac
 
 doc(viz_line, 'The Line Chart shows cumulative transition counts over simulation steps, revealing which transitions dominate the protocol execution.').
 
+% === LINE CHART OPTIONS ===
+line_chart_option(simulation, rate, 50).
+
 % === ACTORS ===
 actor(proposer).
 actor(acceptor).

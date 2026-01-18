@@ -1190,39 +1190,87 @@ transition(busy, done, idle).
                 })).sort((a, b) => a.seq - b.seq);
 
                 const senders = new Set();
-                ordered.forEach(m => senders.add(m.from));
+                const perStepCounts = new Map();
+                ordered.forEach(evt => {
+                    senders.add(evt.from);
+                    const entry = perStepCounts.get(evt.seq) || new Map();
+                    entry.set(evt.from, (entry.get(evt.from) || 0) + 1);
+                    perStepCounts.set(evt.seq, entry);
+                });
 
-                const runningCounts = {};
-                const cumulativeBySender = new Map();
+                const seqs = Array.from(perStepCounts.keys()).sort((a, b) => a - b);
+                const perStepBySender = new Map();
                 for (const sender of senders) {
-                    runningCounts[sender] = 0;
-                    cumulativeBySender.set(sender, []);
+                    perStepBySender.set(sender, []);
                 }
 
                 const xValues = [];
-                ordered.forEach(evt => {
-                    runningCounts[evt.from]++;
-                    xValues.push(evt.seq);
-                    for (const [sender, arr] of cumulativeBySender) {
-                        arr.push(runningCounts[sender]);
+                for (const seq of seqs) {
+                    xValues.push(seq);
+                    const entry = perStepCounts.get(seq);
+                    for (const [sender, values] of perStepBySender) {
+                        values.push(entry && entry.has(sender) ? entry.get(sender) : 0);
                     }
+                }
+
+                const cumulativeBySender = new Map();
+                for (const [sender, values] of perStepBySender) {
+                    let total = 0;
+                    cumulativeBySender.set(sender, values.map(value => {
+                        total += value;
+                        return total;
+                    }));
+                }
+
+                const lineOptions = await loadLineChartOptions();
+                if (!lineOptions.chartModes.has('simulation')) {
+                    lineOptions.chartModes.set('simulation', 'diff');
+                }
+                if (!lineOptions.chartSmooth.has('simulation')) {
+                    lineOptions.chartSmooth.set('simulation', 50);
+                }
+                const simulationMode = lineOptions.chartModes.get('simulation') || '';
+                const simulationWindow = lineOptions.chartSmooth.get('simulation') || 0;
+                const seriesValues = buildSeriesValues({
+                    chartName: 'simulation',
+                    seqs,
+                    senders,
+                    perStepBySender,
+                    cumulativeBySender,
+                    options: lineOptions
                 });
 
-                const maxY = Math.max(...Object.values(runningCounts)) + 2;
+                let maxY = 1;
+                for (const values of seriesValues.values()) {
+                    for (const value of values) {
+                        if (value > maxY) {
+                            maxY = value;
+                        }
+                    }
+                }
+                maxY += 1;
                 const xAxis = xValues.map(x => `"${x}"`).join(', ');
 
+                const simTitle = simulationMode === 'cumulative'
+                    ? 'Messages Over Simulation'
+                    : 'Messages Per Step';
+                const simModeLabel = simulationMode === 'diff' ? 'rate' : 'cumulative';
+                const legendTitle = simulationWindow > 1
+                    ? `line_chart_option(simulation, ${simModeLabel}, ${simulationWindow}).`
+                    : `line_chart_option(simulation, ${simModeLabel}).`;
+
                 let code = `xychart-beta
-    title "Messages Over Simulation"
+    title "${simTitle}"
     x-axis "Step" [${xAxis}]
     y-axis "Count" 0 --> ${maxY}`;
 
-                for (const [sender, values] of cumulativeBySender) {
+                for (const [sender, values] of seriesValues) {
                     code += `\n    line [${values.join(', ')}]`;
                 }
 
                 if (lineOutput) {
-                    const series = Array.from(cumulativeBySender.keys()).map(name => ({ name }));
-                    const legendHtml = generateLineLegend({ series });
+                    const series = Array.from(seriesValues.keys()).map(name => ({ name }));
+                    const legendHtml = generateLineLegend({ series, title: legendTitle });
                     lineOutput.innerHTML = `<pre class="mermaid">${code}</pre>${legendHtml}`;
                 }
 
@@ -1308,33 +1356,64 @@ transition(busy, done, idle).
                         })).sort((a, b) => a.seq - b.seq);
                         
                         const senders = new Set();
-                        ordered.forEach(m => senders.add(m.from));
-                        
-                        const runningCounts = {};
-                        const cumulativeBySender = new Map();
-                        for (const sender of senders) {
-                            runningCounts[sender] = 0;
-                            cumulativeBySender.set(sender, []);
-                        }
-                        
-                        const xValues = [];
+                        const perStepCounts = new Map();
                         ordered.forEach(evt => {
-                            runningCounts[evt.from]++;
-                            xValues.push(evt.seq);
-                            
-                            for (const [sender, arr] of cumulativeBySender) {
-                                arr.push(runningCounts[sender]);
-                            }
+                            senders.add(evt.from);
+                            const entry = perStepCounts.get(evt.seq) || new Map();
+                            entry.set(evt.from, (entry.get(evt.from) || 0) + 1);
+                            perStepCounts.set(evt.seq, entry);
                         });
-                        
+
+                        const seqs = Array.from(perStepCounts.keys()).sort((a, b) => a - b);
+                        const perStepBySender = new Map();
+                        for (const sender of senders) {
+                            perStepBySender.set(sender, []);
+                        }
+
+                        const xValues = [];
+                        for (const seq of seqs) {
+                            xValues.push(seq);
+                            const entry = perStepCounts.get(seq);
+                            for (const [sender, values] of perStepBySender) {
+                                values.push(entry && entry.has(sender) ? entry.get(sender) : 0);
+                            }
+                        }
+
                         if (xValues.length === 0) {
                             output.innerHTML = '<div style="color: var(--text-secondary);">No message data.</div>';
                             return;
                         }
+
+                        const cumulativeBySender = new Map();
+                        for (const [sender, values] of perStepBySender) {
+                            let total = 0;
+                            cumulativeBySender.set(sender, values.map(value => {
+                                total += value;
+                                return total;
+                            }));
+                        }
+
+                        const lineOptions = await loadLineChartOptions();
+                        if (!lineOptions.chartModes.has('sequence')) {
+                            lineOptions.chartModes.set('sequence', 'diff');
+                        }
+                        if (!lineOptions.chartSmooth.has('sequence')) {
+                            lineOptions.chartSmooth.set('sequence', 50);
+                        }
+                        const sequenceMode = lineOptions.chartModes.get('sequence') || '';
+                        const sequenceWindow = lineOptions.chartSmooth.get('sequence') || 0;
+                        const seriesValues = buildSeriesValues({
+                            chartName: 'sequence',
+                            seqs,
+                            senders,
+                            perStepBySender,
+                            cumulativeBySender,
+                            options: lineOptions
+                        });
                         
                         const maxPoints = 200;
                         let sampledX = xValues;
-                        let sampledSeries = cumulativeBySender;
+                        let sampledSeries = seriesValues;
                         
                         if (xValues.length > maxPoints) {
                             const stride = Math.ceil(xValues.length / maxPoints);
@@ -1345,16 +1424,32 @@ transition(busy, done, idle).
                             
                             sampledX = sampleIdx.map(i => xValues[i]);
                             sampledSeries = new Map();
-                            for (const [sender, values] of cumulativeBySender) {
+                            for (const [sender, values] of seriesValues) {
                                 sampledSeries.set(sender, sampleIdx.map(i => values[i]));
                             }
                         }
-                        
-                        const maxY = Math.max(...Object.values(runningCounts)) + 2;
+
+                        let maxY = 1;
+                        for (const values of sampledSeries.values()) {
+                            for (const value of values) {
+                                if (value > maxY) {
+                                    maxY = value;
+                                }
+                            }
+                        }
+                        maxY += 1;
                         const xAxis = sampledX.map(x => `"${x}"`).join(', ');
                         
+                        const seqTitle = sequenceMode === 'cumulative'
+                            ? 'Messages Over Sequence'
+                            : 'Messages Per Sequence Step';
+                        const seqModeLabel = sequenceMode === 'diff' ? 'rate' : 'cumulative';
+                        const seqLegendTitle = sequenceWindow > 1
+                            ? `line_chart_option(sequence, ${seqModeLabel}, ${sequenceWindow}).`
+                            : `line_chart_option(sequence, ${seqModeLabel}).`;
+
                         let code = `xychart-beta
-    title "Messages Over Sequence"
+    title "${seqTitle}"
     x-axis "Seq" [${xAxis}]
     y-axis "Count" 0 --> ${maxY}`;
                         
@@ -1363,7 +1458,7 @@ transition(busy, done, idle).
                         }
                         
                         const series = Array.from(sampledSeries.keys()).map(name => ({ name }));
-                        const legendHtml = generateLineLegend({ series });
+                        const legendHtml = generateLineLegend({ series, title: seqLegendTitle });
                         output.innerHTML = `<pre class="mermaid">${code}</pre>${legendHtml}`;
                         try {
                             await mermaid.run();
@@ -1679,6 +1774,9 @@ transition(busy, done, idle).
             const colors = ['#58a6ff', '#3fb950', '#f85149', '#d29922', '#a371f7', '#f778ba'];
             
             let html = '<div style="display: flex; flex-wrap: wrap; gap: 16px; margin-top: 12px; padding: 8px; background: var(--bg-tertiary); border-radius: 4px;">';
+            if (data.title) {
+                html += `<div style="width: 100%; color: var(--text-secondary); font-size: 0.8rem;">${escapeHtml(data.title)}</div>`;
+            }
             data.series.forEach((series, i) => {
                 const color = colors[i % colors.length];
                 html += `<div style="display: flex; align-items: center; gap: 6px;">
@@ -1733,6 +1831,185 @@ transition(busy, done, idle).
                 return '';
             }
             return text.replace(/%/g, ' percent');
+        }
+
+        function cleanPrologAtom(text) {
+            const trimmed = text.trim();
+            if (trimmed.startsWith("'") && trimmed.endsWith("'") && trimmed.length >= 2) {
+                return trimmed.slice(1, -1).replace(/''/g, "'");
+            }
+            return trimmed;
+        }
+
+        function normalizeLineMode(text) {
+            const value = cleanPrologAtom(text || '').toLowerCase();
+            if (value === 'diff' || value === 'first_diff' || value === 'per_step' || value === 'rate') {
+                return 'diff';
+            }
+            if (value === 'cumulative' || value === 'raw') {
+                return 'cumulative';
+            }
+            return '';
+        }
+
+        function parseLineChartOptions(source) {
+            const chartModes = new Map();
+            const chartSmooth = new Map();
+            const diffSeries = new Set();
+            const seriesSmooth = new Map();
+            const divideSeries = new Map();
+
+            const chartRegex = /line_chart_option\(\s*([^,]+)\s*,\s*([^)]+)\)\s*\./g;
+            let match;
+            while ((match = chartRegex.exec(source)) !== null) {
+                const chart = cleanPrologAtom(match[1]);
+                const mode = normalizeLineMode(match[2]);
+                if (chart && mode) {
+                    chartModes.set(chart, mode);
+                }
+            }
+
+            const chartSmoothRegex = /line_chart_option\(\s*([^,]+)\s*,\s*([^,]+)\s*,\s*([^)]+)\)\s*\./g;
+            while ((match = chartSmoothRegex.exec(source)) !== null) {
+                const chart = cleanPrologAtom(match[1]);
+                const option = cleanPrologAtom(match[2]).toLowerCase();
+                const mode = normalizeLineMode(option);
+                if (chart && mode) {
+                    chartModes.set(chart, mode);
+                }
+                const window = parseInt(cleanPrologAtom(match[3]), 10);
+                if (chart && Number.isFinite(window) && window > 1) {
+                    chartSmooth.set(chart, window);
+                }
+            }
+
+            const diffRegex = /line_series_option\(\s*([^,]+)\s*,\s*(diff|first_diff|per_step|rate)\s*\)\s*\./g;
+            while ((match = diffRegex.exec(source)) !== null) {
+                const series = cleanPrologAtom(match[1]);
+                if (series) {
+                    diffSeries.add(series);
+                }
+            }
+
+            const diffSmoothRegex = /line_series_option\(\s*([^,]+)\s*,\s*(diff|first_diff|per_step|rate)\s*,\s*([^)]+)\)\s*\./g;
+            while ((match = diffSmoothRegex.exec(source)) !== null) {
+                const series = cleanPrologAtom(match[1]);
+                if (series) {
+                    diffSeries.add(series);
+                    const window = parseInt(cleanPrologAtom(match[3]), 10);
+                    if (Number.isFinite(window) && window > 1) {
+                        seriesSmooth.set(series, window);
+                    }
+                }
+            }
+
+            const smoothRegex = /line_series_option\(\s*([^,]+)\s*,\s*smooth\s*,\s*([^)]+)\)\s*\./g;
+            while ((match = smoothRegex.exec(source)) !== null) {
+                const series = cleanPrologAtom(match[1]);
+                const window = parseInt(cleanPrologAtom(match[2]), 10);
+                if (series && Number.isFinite(window) && window > 1) {
+                    seriesSmooth.set(series, window);
+                }
+            }
+
+            const divideRegex = /line_series_option\(\s*([^,]+)\s*,\s*divide\s*,\s*([^)]+)\)\s*\./g;
+            while ((match = divideRegex.exec(source)) !== null) {
+                const series = cleanPrologAtom(match[1]);
+                const denom = cleanPrologAtom(match[2]);
+                if (series && denom) {
+                    divideSeries.set(series, denom);
+                }
+            }
+
+            return {
+                chartModes,
+                chartSmooth,
+                diffSeries,
+                seriesSmooth,
+                divideSeries
+            };
+        }
+
+        async function loadLineChartOptions() {
+            try {
+                const resp = await fetch('/api/spec');
+                const data = await resp.json();
+                const source = data && data.source ? data.source : '';
+                return parseLineChartOptions(source);
+            } catch (_err) {
+                return {
+                    chartModes: new Map(),
+                    chartSmooth: new Map(),
+                    diffSeries: new Set(),
+                    seriesSmooth: new Map(),
+                    divideSeries: new Map()
+                };
+            }
+        }
+
+        function smoothSeries(values, window) {
+            const result = [];
+            let sum = 0;
+            const windowValues = [];
+            for (let i = 0; i < values.length; i++) {
+                const value = values[i];
+                windowValues.push(value);
+                sum += value;
+                if (windowValues.length > window) {
+                    sum -= windowValues.shift();
+                }
+                result.push(sum / windowValues.length);
+            }
+            return result;
+        }
+
+        function buildSeriesValues({ chartName, seqs, senders, perStepBySender, cumulativeBySender, options }) {
+            const mode = options.chartModes.get(chartName) || '';
+            const chartWindow = options.chartSmooth.get(chartName) || 0;
+            const diffSeries = options.diffSeries;
+            const seriesSmooth = options.seriesSmooth;
+            const divideSeries = options.divideSeries;
+            const seriesValues = new Map();
+            const building = new Set();
+
+            const baseValues = (name) => {
+                const perStep = perStepBySender.get(name) || Array(seqs.length).fill(0);
+                const cumulative = cumulativeBySender.get(name) || Array(seqs.length).fill(0);
+                const useDiff = diffSeries.has(name) || mode === 'diff';
+                return useDiff ? perStep : cumulative;
+            };
+
+            const getValues = (name) => {
+                if (seriesValues.has(name)) {
+                    return seriesValues.get(name);
+                }
+                if (building.has(name)) {
+                    return baseValues(name);
+                }
+                building.add(name);
+                let values = baseValues(name);
+                if (divideSeries.has(name)) {
+                    const denomName = divideSeries.get(name);
+                    const denomValues = getValues(denomName);
+                    values = values.map((value, idx) => {
+                        const denom = denomValues[idx] || 0;
+                        return denom === 0 ? 0 : value / denom;
+                    });
+                }
+                const window = seriesSmooth.get(name) || chartWindow;
+                if (window && window > 1) {
+                    values = smoothSeries(values, window);
+                }
+                seriesValues.set(name, values);
+                building.delete(name);
+                return values;
+            };
+
+            for (const sender of senders) {
+                getValues(sender);
+            }
+
+            return seriesValues;
         }
 
         function actorFromState(state) {

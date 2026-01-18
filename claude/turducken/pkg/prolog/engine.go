@@ -58,6 +58,18 @@ func (e *Engine) loadCore() error {
 :- discontiguous(actor_initial/2).
 :- discontiguous(actor_transition/4).
 :- discontiguous(prop/2).
+:- discontiguous(send/4).
+:- discontiguous(recv/4).
+:- discontiguous(channel/2).
+:- discontiguous(doc/2).
+:- discontiguous(property/3).
+:- discontiguous(msg_annotation/3).
+:- discontiguous(message/4).
+:- discontiguous(message_format/2).
+:- discontiguous(lifeline/1).
+:- discontiguous(state_guard/2).
+:- discontiguous(transition_guard/4).
+:- discontiguous(transition_prob/4).
 
 % --- CTL Operators (Kripke structure based) ---
 % The model is defined by: state/2, transition/3, prop/2
@@ -177,6 +189,8 @@ transition_guard(_, _, _, _) :- fail.
 dice0_value(_) :- fail.
 dice0(Low, High) :-
     (dice0_value(D) -> D >= Low, D < High ; true).
+prob(dice0, Low, High) :-
+    dice0(Low, High).
 
 % --- Visualization Extraction ---
 

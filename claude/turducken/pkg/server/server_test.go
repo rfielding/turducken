@@ -6,7 +6,7 @@ import (
 	"github.com/rfielding/turducken/pkg/prolog"
 )
 
-func xTestSimulationStateGuardBlocksTransitions(t *testing.T) {
+func TestSimulationStateGuardBlocksTransitions(t *testing.T) {
 	engine, err := prolog.New()
 	if err != nil {
 		t.Fatalf("prolog.New error: %v", err)

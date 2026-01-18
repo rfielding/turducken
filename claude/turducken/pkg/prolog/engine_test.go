@@ -175,7 +175,7 @@ func TestCTLCombinators(t *testing.T) {
 	}
 }
 
-func xTestSequenceDiagram(t *testing.T) {
+func TestSequenceDiagram(t *testing.T) {
 	e, _ := New()
 	ctx := context.Background()
 
