@@ -567,7 +567,7 @@
                     <div class="panel-body">
                         <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap;">
                             <label for="simulationSteps" style="color: var(--text-secondary); font-size: 0.85rem;">Steps</label>
-                            <input type="number" id="simulationSteps" value="1000" min="1" style="width: 120px;">
+                            <input type="number" id="simulationSteps" value="100" min="1" style="width: 120px;">
                             <button class="btn btn-secondary" onclick="renderSimulation()">Run Simulation</button>
                         </div>
                         <div class="viz-section">
@@ -703,7 +703,7 @@ transition(busy, done, idle).
             themeVariables: {
                 darkMode: true,
                 background: '#0d1117',
-                primaryColor: '#58a6ff',
+                primaryColor: '#1f3b5a',
                 primaryTextColor: '#e6edf3',
                 primaryBorderColor: '#30363d',
                 lineColor: '#8b949e',
@@ -716,6 +716,7 @@ transition(busy, done, idle).
         const transitionProbabilities = new Map();
         const transitionProbabilitiesByLabel = new Map();
         const messageAnnotations = new Map();
+        const messagePeers = new Map();
         let stateMachineDirection = 'TB';
         let showMermaidSource = true;
         
@@ -1212,8 +1213,8 @@ transition(busy, done, idle).
             const lineOutput = document.getElementById('simulationLineOutput');
             const pieOutput = document.getElementById('simulationPieOutput');
             const stepsInput = document.getElementById('simulationSteps');
-            const steps = parseInt(stepsInput?.value || '1000', 10);
-            const safeSteps = Number.isFinite(steps) && steps > 0 ? steps : 1000;
+            const steps = parseInt(stepsInput?.value || '100', 10);
+            const safeSteps = Number.isFinite(steps) && steps > 0 ? steps : 100;
             if (stepsInput) {
                 stepsInput.value = safeSteps;
             }
@@ -1362,7 +1363,7 @@ transition(busy, done, idle).
                     }
                 }
                 maxY += 1;
-                const xAxis = xValues.map(x => `"${x}"`).join(', ');
+                const xAxis = buildXAxisRange(xValues);
 
                 const simTitle = simulationMode === 'cumulative'
                     ? 'Messages Over Simulation'
@@ -1395,10 +1396,11 @@ transition(busy, done, idle).
                             }
                         }
                         chartMax += 1;
+                        const yAxisLabel = simulationMode === 'diff' ? 'Rate' : 'Count';
                         let code = `xychart-beta
     title "${escapeHtml(chartDef.name)}"
-    x-axis "Step" [${xAxis}]
-    y-axis "Count" 0 --> ${chartMax}`;
+    x-axis "Step" ${xAxis}
+    y-axis "${yAxisLabel}" 0 --> ${chartMax}`;
                         for (const values of filtered.values()) {
                             code += `\n    line [${values.join(', ')}]`;
                         }
@@ -1605,7 +1607,7 @@ transition(busy, done, idle).
                             }
                         }
                         maxY += 1;
-                        const xAxis = sampledX.map(x => `"${x}"`).join(', ');
+                        const xAxis = buildXAxisRange(sampledX);
                         
                         const seqTitle = sequenceMode === 'cumulative'
                             ? 'Messages Over Sequence'
@@ -1644,7 +1646,7 @@ transition(busy, done, idle).
 
                             let code = `xychart-beta
     title "${escapeHtml(chartDef.name)}"
-    x-axis "Seq" [${xAxis}]
+    x-axis "Seq" ${xAxis}
     y-axis "Count" 0 --> ${chartMax}`;
                             for (const values of filtered.values()) {
                                 code += `\n    line [${values.join(', ')}]`;
@@ -1795,8 +1797,7 @@ transition(busy, done, idle).
                 const sm = actorMachines[actor];
                 if (!sm) continue;
                 
-                let code = "%%{init: {'stateDiagram': {'nodeSpacing': 300, 'rankSpacing': 240}}}%%\n";
-                code += 'stateDiagram-v2\n';
+                let code = 'stateDiagram-v2\n';
                 code += `    direction ${stateMachineDirection}\n`;
                 
                 sm.initial.forEach(s => {
@@ -1836,8 +1837,7 @@ transition(busy, done, idle).
                 return null;
             }
             
-            let code = "%%{init: {'stateDiagram': {'nodeSpacing': 300, 'rankSpacing': 240, 'edgeLabelSpacing': 20}}}%%\n";
-            code += 'stateDiagram-v2\n';
+            let code = 'stateDiagram-v2\n';
             code += `    direction ${stateMachineDirection}\n`;
             
             if (data.initial && data.initial.length > 0) {
@@ -1914,7 +1914,7 @@ transition(busy, done, idle).
             }
             
             const sortedX = [...allXValues].sort((a, b) => a - b);
-            const xValues = sortedX.map(x => `"${x}"`).join(', ');
+            const xValues = buildXAxisRange(sortedX);
             
             let maxY = 0;
             data.series.forEach(series => {
@@ -1928,7 +1928,7 @@ transition(busy, done, idle).
             
             let code = `xychart-beta
     title "Metrics Over Time"
-    x-axis [${xValues}]
+    x-axis ${xValues}
     y-axis "Value" 0 --> ${maxY}`;
             
             data.series.forEach(series => {
@@ -2027,8 +2027,9 @@ transition(busy, done, idle).
             let label = sanitizeMermaidLabel(toUnicodeLogic(rawLabel));
             const prob = transitionProbabilities.get(transitionKey(transition.from, rawLabel, transition.to))
                 || transitionProbabilitiesByLabel.get(rawLabel);
+            const baseLabel = rawLabel.replace(/^(send|recv)_/, '');
             const directionHint = /^(send|recv)(_|$)/.test(rawLabel) ? RegExp.$1 : '';
-            const ann = messageAnnotations.get(rawLabel);
+            const ann = messageAnnotations.get(rawLabel) || messageAnnotations.get(baseLabel);
             let dest = '';
             let direction = '';
             if (ann) {
@@ -2044,6 +2045,18 @@ transition(busy, done, idle).
                 } else if (ann.recv && ann.recv.length > 0) {
                     direction = 'recv';
                     dest = ann.recv[0];
+                }
+            }
+            if (!dest && directionHint) {
+                const peers = messagePeers.get(baseLabel);
+                if (peers) {
+                    if (directionHint === 'send' && peers.recv && peers.recv.length > 0) {
+                        dest = peers.recv[0];
+                        direction = 'send';
+                    } else if (directionHint === 'recv' && peers.send && peers.send.length > 0) {
+                        dest = peers.send[0];
+                        direction = 'recv';
+                    }
                 }
             }
             if (!dest && directionHint) {
@@ -2076,6 +2089,15 @@ transition(busy, done, idle).
                 return 'cumulative';
             }
             return '';
+        }
+
+        function buildXAxisRange(values) {
+            if (!Array.isArray(values) || values.length === 0) {
+                return '0 --> 1';
+            }
+            const min = values[0];
+            const max = values[values.length - 1];
+            return `${min} --> ${max}`;
         }
 
         function parseLineChartOptions(source) {
@@ -2414,6 +2436,7 @@ transition(busy, done, idle).
             transitionProbabilities.clear();
             transitionProbabilitiesByLabel.clear();
             messageAnnotations.clear();
+            messagePeers.clear();
             if (!source) {
                 return;
             }
@@ -2480,6 +2503,29 @@ transition(busy, done, idle).
                     }
                 }
                 messageAnnotations.set(label, entry);
+            }
+
+            const actorTransitionRegex = /actor_transition\(\s*([^,]+)\s*,\s*([^,]+)\s*,\s*([^,]+)\s*,\s*([^)]+)\)\s*\./g;
+            while ((match = actorTransitionRegex.exec(source)) !== null) {
+                const actor = cleanPrologAtom(match[1].trim());
+                const label = cleanPrologAtom(match[3].trim());
+                const dirMatch = /^(send|recv)_(.+)$/.exec(label);
+                if (!dirMatch || !actor) {
+                    continue;
+                }
+                const direction = dirMatch[1];
+                const base = dirMatch[2];
+                const entry = messagePeers.get(base) || { send: [], recv: [] };
+                if (direction === 'send') {
+                    if (!entry.send.includes(actor)) {
+                        entry.send.push(actor);
+                    }
+                } else {
+                    if (!entry.recv.includes(actor)) {
+                        entry.recv.push(actor);
+                    }
+                }
+                messagePeers.set(base, entry);
             }
         }
 
@@ -2832,7 +2878,6 @@ transition(busy, done, idle).
             let code = '';
             actors.forEach((actor, idx) => {
                 if (idx > 0) code += '\n\n';
-                code += "%%{init: {'stateDiagram': {'nodeSpacing': 300, 'rankSpacing': 240}}}%%\n";
                 code += `stateDiagram-v2\n`;
                 code += `    direction ${stateMachineDirection}\n`;
                 code += `    %% ${actor.actor}\n`;
